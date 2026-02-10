@@ -57,6 +57,15 @@ func (s *S3Service) Upload(ctx context.Context, prefix, originalFilename string,
 	return key, nil
 }
 
+// Delete removes the object from S3.
+func (s *S3Service) Delete(ctx context.Context, key string) error {
+	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	return err
+}
+
 // PresignedGetURL returns a temporary URL to download the object (e.g. for reading the book).
 func (s *S3Service) PresignedGetURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
 	presigner := s3.NewPresignClient(s.client)

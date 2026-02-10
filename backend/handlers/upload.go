@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -63,6 +64,7 @@ func (h *UploadHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	ext := strings.ToLower(strings.TrimSpace(filepath.Ext(header.Filename)))
 	partContentType := header.Header.Get("Content-Type")
+	fmt.Println(ext, partContentType, "########################################################")
 	allowedByExt := ext == ".epub" || ext == ".pdf"
 	allowedByMime := strings.HasPrefix(partContentType, "application/epub+zip") || strings.HasPrefix(partContentType, "application/pdf")
 	if !allowedByExt && !allowedByMime {

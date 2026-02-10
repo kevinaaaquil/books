@@ -100,3 +100,30 @@ func (h *BooksHandler) Download(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(DownloadResponse{URL: url})
 }
+
+func (h *BooksHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, ok := middleware.UserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	idStr := chi.URLParam(r, "id")
+	id, err := primitive.ObjectIDFromHex(idStr)
+	if err != nil {
+		http.Error(w, `{"error":"invalid book id"}`, http.StatusBadRequest)
+		return
+	}
+	s3Key, err := h.DB.DeleteBook(r.Context(), id, userID)
+	if err != nil {
+		http.Error(w, `{"error":"book not found"}`, http.StatusNotFound)
+		return
+	}
+	if h.S3 != nil && s3Key != "" {
+		_ = h.S3.Delete(r.Context(), s3Key)
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

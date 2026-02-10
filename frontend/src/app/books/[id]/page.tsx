@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { fetchBook, getDownloadUrl, isAuthenticated } from "@/lib/api";
+import { fetchBook, getDownloadUrl, deleteBook, isAuthenticated } from "@/lib/api";
 
 export default function BookDetailPage() {
   const router = useRouter();
@@ -12,6 +12,7 @@ export default function BookDetailPage() {
   const [book, setBook] = useState<Awaited<ReturnType<typeof fetchBook>> | null>(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -33,6 +34,19 @@ export default function BookDetailPage() {
       window.open(url, "_blank");
     } finally {
       setDownloading(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!id) return;
+    if (!confirm("If you delete this book, it will be lost forever. Are you sure?")) return;
+    setDeleting(true);
+    try {
+      await deleteBook(id);
+      router.push("/books");
+      router.refresh();
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -83,7 +97,7 @@ export default function BookDetailPage() {
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <h1 className="text-2xl font-semibold text-stone-900 dark:text-stone-100">
+              <h1 className="text-2xl font-semibold text-stone-900 dark:text-stone-100 break-words">
                 {book.title}
               </h1>
               {book.authors?.length ? (
@@ -127,13 +141,22 @@ export default function BookDetailPage() {
                 <dt className="text-accent-muted dark:text-accent-muted font-medium">File</dt>
                 <dd className="text-stone-900 dark:text-stone-100 truncate">{book.originalName}</dd>
               </dl>
-              <button
-                onClick={handleDownload}
-                disabled={downloading}
-                className="mt-6 rounded-lg bg-accent hover:bg-accent-hover text-stone-900 font-medium px-4 py-2 disabled:opacity-50"
-              >
-                {downloading ? "Preparing…" : "Download book"}
-              </button>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <button
+                  onClick={handleDownload}
+                  disabled={downloading}
+                  className="rounded-lg bg-accent hover:bg-accent-hover text-stone-900 font-medium px-4 py-2 disabled:opacity-50"
+                >
+                  {downloading ? "Preparing…" : "Download book"}
+                </button>
+                <button
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="rounded-lg border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 font-medium px-4 py-2 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50"
+                >
+                  {deleting ? "Deleting…" : "Delete book"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

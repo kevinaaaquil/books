@@ -39,3 +39,13 @@ func (db *DB) BookByID(ctx context.Context, id, userID primitive.ObjectID) (*mod
 	}
 	return &book, nil
 }
+
+// DeleteBook removes a book by ID only if it belongs to the given user. Returns the deleted book's S3Key and any error.
+func (db *DB) DeleteBook(ctx context.Context, id, userID primitive.ObjectID) (s3Key string, err error) {
+	var book models.Book
+	err = db.Books().FindOneAndDelete(ctx, bson.M{"_id": id, "userId": userID}).Decode(&book)
+	if err != nil {
+		return "", err
+	}
+	return book.S3Key, nil
+}

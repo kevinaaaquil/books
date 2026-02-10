@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { fetchBooks, uploadBook, clearToken, isAuthenticated, type Book } from "@/lib/api";
+import { fetchBooks, uploadBook, deleteBook, clearToken, isAuthenticated, type Book } from "@/lib/api";
 
 export default function BooksPage() {
   const router = useRouter();
@@ -11,6 +11,7 @@ export default function BooksPage() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -19,7 +20,7 @@ export default function BooksPage() {
       return;
     }
     fetchBooks()
-      .then(setBooks)
+      .then((list) => setBooks(Array.isArray(list) ? list : []))
       .catch(() => setBooks([]))
       .finally(() => setLoading(false));
   }, [router]);
@@ -32,12 +33,27 @@ export default function BooksPage() {
     try {
       await uploadBook(file);
       const list = await fetchBooks();
-      setBooks(list);
+      setBooks(Array.isArray(list) ? list : []);
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function handleDelete(e: React.MouseEvent, id: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm("If you delete this book, it will be lost forever. Are you sure?")) return;
+    setDeletingId(id);
+    try {
+      await deleteBook(id);
+      setBooks((prev) => prev.filter((b) => b.id !== id));
+    } catch {
+      // keep list as is on error
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -54,6 +70,8 @@ export default function BooksPage() {
       </div>
     );
   }
+
+  const bookList = Array.isArray(books) ? books : [];
 
   return (
     <div className="min-h-screen bg-accent-soft dark:bg-accent-soft">
@@ -92,7 +110,7 @@ export default function BooksPage() {
           )}
         </div>
 
-        {books.length === 0 ? (
+        {bookList.length === 0 ? (
           <div className="rounded-xl border-2 border-dashed border-accent/40 bg-accent-soft/50 dark:bg-accent-soft/50 p-12 text-center">
             <p className="text-accent-muted dark:text-accent-muted mb-1">
               No books yet.
@@ -103,7 +121,7 @@ export default function BooksPage() {
           </div>
         ) : (
           <ul className="grid gap-4 sm:grid-cols-2">
-            {books.map((book) => (
+            {bookList.map((book) => (
               <li key={book.id}>
                 <Link
                   href={`/books/${book.id}`}
@@ -122,17 +140,28 @@ export default function BooksPage() {
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
-                      <h2 className="font-medium text-stone-900 dark:text-stone-100 truncate">
+                      <h2 className="font-medium text-stone-900 dark:text-stone-100 break-words">
                         {book.title}
                       </h2>
                       {book.authors?.length ? (
-                        <p className="text-sm text-accent-muted dark:text-accent-muted truncate">
+                        <p className="text-sm text-accent-muted dark:text-accent-muted break-words line-clamp-2">
                           {book.authors.join(", ")}
                         </p>
                       ) : null}
-                      <span className="inline-block mt-2 text-xs font-medium uppercase px-2 py-0.5 rounded bg-accent/20 text-accent-muted dark:text-accent-muted">
-                        {book.format}
-                      </span>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="inline-block text-xs font-medium uppercase px-2 py-0.5 rounded bg-accent/20 text-accent-muted dark:text-accent-muted">
+                          {book.format}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => handleDelete(e, book.id)}
+                          disabled={deletingId === book.id}
+                          className="text-xs font-medium text-red-600 dark:text-red-400 hover:underline disabled:opacity-50"
+                          aria-label={`Delete ${book.title}`}
+                        >
+                          {deletingId === book.id ? "Deleting…" : "Delete"}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </Link>

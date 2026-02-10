@@ -86,6 +86,7 @@ func main() {
 			r.Get("/books", booksHandler.List)
 			r.Get("/books/{id}", booksHandler.Get)
 			r.Get("/books/{id}/download", booksHandler.Download)
+			r.Delete("/books/{id}", booksHandler.Delete)
 		})
 	})
 

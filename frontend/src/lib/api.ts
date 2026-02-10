@@ -86,6 +86,20 @@ export async function getDownloadUrl(id: string): Promise<string> {
   return data.url;
 }
 
+export async function deleteBook(id: string): Promise<void> {
+  const res = await authFetch(`/api/books/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const text = await res.text();
+    try {
+      const data = JSON.parse(text) as { error?: string };
+      throw new Error(data.error || "Failed to delete book");
+    } catch (e) {
+      if (e instanceof Error && e.message !== "Failed to delete book") throw e;
+      throw new Error("Failed to delete book");
+    }
+  }
+}
+
 export async function uploadBook(file: File): Promise<{ id: string; title: string }> {
   const token = getToken();
   if (!token) throw new Error("Not logged in");
