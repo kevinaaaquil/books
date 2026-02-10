@@ -9,14 +9,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Kevin-Aaaquil/books/backend/config"
-	"github.com/Kevin-Aaaquil/books/backend/handlers"
-	"github.com/Kevin-Aaaquil/books/backend/middleware"
-	"github.com/Kevin-Aaaquil/books/backend/service"
-	"github.com/Kevin-Aaaquil/books/backend/store"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/joho/godotenv"
+	"github.com/kevinaaaquil/books/backend/config"
+	"github.com/kevinaaaquil/books/backend/handlers"
+	"github.com/kevinaaaquil/books/backend/middleware"
+	"github.com/kevinaaaquil/books/backend/service"
+	"github.com/kevinaaaquil/books/backend/store"
 )
 
 func main() {

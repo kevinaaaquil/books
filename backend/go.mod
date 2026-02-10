@@ -1,4 +1,4 @@
-module github.com/Kevin-Aaaquil/books/backend
+module github.com/kevinaaaquil/books/backend
 
 go 1.23.2
 

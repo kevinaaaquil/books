@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Kevin-Aaaquil/books/backend/middleware"
-	"github.com/Kevin-Aaaquil/books/backend/service"
-	"github.com/Kevin-Aaaquil/books/backend/store"
 	"github.com/go-chi/chi/v5"
+	"github.com/kevinaaaquil/books/backend/middleware"
+	"github.com/kevinaaaquil/books/backend/service"
+	"github.com/kevinaaaquil/books/backend/store"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 

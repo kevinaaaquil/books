@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Kevin-Aaaquil/books/backend/middleware"
-	"github.com/Kevin-Aaaquil/books/backend/models"
-	"github.com/Kevin-Aaaquil/books/backend/store"
+	"github.com/kevinaaaquil/books/backend/middleware"
+	"github.com/kevinaaaquil/books/backend/models"
+	"github.com/kevinaaaquil/books/backend/store"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )

@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kevin-Aaaquil/books/backend/middleware"
-	"github.com/Kevin-Aaaquil/books/backend/models"
-	"github.com/Kevin-Aaaquil/books/backend/service"
-	"github.com/Kevin-Aaaquil/books/backend/store"
-	"github.com/Kevin-Aaaquil/books/backend/utils"
+	"github.com/kevinaaaquil/books/backend/middleware"
+	"github.com/kevinaaaquil/books/backend/models"
+	"github.com/kevinaaaquil/books/backend/service"
+	"github.com/kevinaaaquil/books/backend/store"
+	"github.com/kevinaaaquil/books/backend/utils"
 )
 
 const (
