@@ -1,0 +1,13 @@
+# Frontend only — for local dev. Run from frontend/: docker compose up
+# Set NEXT_PUBLIC_API_BASE_URL to your backend URL (e.g. http://localhost:8080).
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8080}
+    network_mode: host
+    env_file: .env
+    restart: unless-stopped

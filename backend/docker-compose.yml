@@ -1,0 +1,11 @@
+# Backend only — for local dev. Run from backend/: docker compose up
+# MongoDB: set MONGODB_URI in .env (no local mongo container).
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    network_mode: host
+    restart: unless-stopped
