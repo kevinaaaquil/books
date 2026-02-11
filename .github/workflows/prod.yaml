@@ -8,6 +8,8 @@ on:
       - 'backend/**'
       - '.github/workflows/**'
       - 'docker-compose.yml'
+      - 'Dockerfile'
+      - '.dockerignore'
 
 jobs:
   deploy:

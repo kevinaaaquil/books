@@ -1,0 +1,12 @@
+# Only backend is built from root Dockerfile; keep context small
+frontend/
+.git
+.github
+*.md
+plan.md
+docker-compose.yml
+vercel.json
+backend/.air.toml
+backend/docker-compose.yml
+backend/Makefile
+backend/README.md
