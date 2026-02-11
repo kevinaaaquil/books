@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -16,6 +17,28 @@ import (
 	"github.com/kevinaaaquil/books/backend/store"
 	"github.com/kevinaaaquil/books/backend/utils"
 )
+
+// downloadImage fetches an image from url with a timeout. Returns body, Content-Type, and error.
+func downloadImage(url string, timeout time.Duration) ([]byte, string, error) {
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("cover URL returned %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", err
+	}
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "image/jpeg"
+	}
+	return body, ct, nil
+}
 
 const (
 	contentTypeEPUB = "application/epub+zip"
@@ -166,6 +189,17 @@ func (h *UploadHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		}
 		if coverS3Key != "" {
 			book.CoverS3Key = coverS3Key
+		} else if meta != nil && meta.CoverURL != "" {
+			// Store API cover in S3 so we don't depend on slow/unreliable external URLs when displaying.
+			if imgBytes, contentType, err := downloadImage(meta.CoverURL, 10*time.Second); err == nil && len(imgBytes) > 0 {
+				ext := ".jpg"
+				if strings.Contains(contentType, "png") {
+					ext = ".png"
+				}
+				if apiCoverKey, err := h.S3.Upload(r.Context(), "books/covers/", "cover"+ext, bytes.NewReader(imgBytes), contentType); err == nil {
+					book.CoverS3Key = apiCoverKey
+				}
+			}
 		}
 	}
 
