@@ -83,6 +83,12 @@ func (db *DB) UpdateUser(ctx context.Context, id primitive.ObjectID, email *stri
 	return err
 }
 
+// UpdateUserUseExtractedCover sets the current user's thumbnail preference (persisted in MongoDB).
+func (db *DB) UpdateUserUseExtractedCover(ctx context.Context, id primitive.ObjectID, useExtractedCover bool) error {
+	_, err := db.Users().UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"useExtractedCover": useExtractedCover}})
+	return err
+}
+
 func (db *DB) DeleteUser(ctx context.Context, id primitive.ObjectID) error {
 	_, err := db.Users().DeleteOne(ctx, bson.M{"_id": id})
 	return err

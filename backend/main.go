@@ -85,6 +85,8 @@ func main() {
 		r.Get("/books/{id}/cover", booksHandler.Cover) // public so <img src> works without auth
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.Auth(cfg.JWTSecret))
+			r.Get("/me", usersHandler.GetMe)
+			r.Patch("/me/preferences", usersHandler.PatchMePreferences)
 			// Read: admin, editor, viewer
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireAnyRole("admin", "editor", "viewer"))

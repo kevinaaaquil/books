@@ -67,16 +67,18 @@ func (h *BooksHandler) Get(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(book)
 }
 
-// setCoverURLIfExtracted sets book.CoverURL to the API cover endpoint when an extracted cover is stored (CoverS3Key), so the client can use it as main or alternate. Only sets when CoverURL is empty so API-fetched cover takes precedence.
+// setCoverURLIfExtracted sets book.CoverURL / ThumbnailURL when an extracted cover is stored, and always sets ExtractedCoverURL when CoverS3Key is set so the frontend can toggle.
 func setCoverURLIfExtracted(book *models.Book) {
 	if book.CoverS3Key == "" {
 		return
 	}
+	extractedURL := "/api/books/" + book.ID.Hex() + "/cover"
+	book.ExtractedCoverURL = extractedURL
 	if book.CoverURL == "" {
-		book.CoverURL = "/api/books/" + book.ID.Hex() + "/cover"
+		book.CoverURL = extractedURL
 	}
 	if book.ThumbnailURL == "" {
-		book.ThumbnailURL = book.CoverURL
+		book.ThumbnailURL = extractedURL
 	}
 }
 
@@ -208,9 +210,9 @@ func (h *BooksHandler) RefreshMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 	var req RefreshMetadataRequest
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	isbn := strings.TrimSpace(req.ISBN)
+	isbn := strings.ReplaceAll(strings.TrimSpace(req.ISBN), "-", "")
 	if isbn == "" {
-		isbn = strings.TrimSpace(book.ISBN)
+		isbn = strings.ReplaceAll(strings.TrimSpace(book.ISBN), "-", "")
 	}
 	if isbn == "" {
 		http.Error(w, `{"error":"no ISBN provided and book has no ISBN"}`, http.StatusBadRequest)

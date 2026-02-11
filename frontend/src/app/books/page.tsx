@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { fetchBooks, uploadBook, deleteBook, clearToken, isAuthenticated, isAdmin, canUploadBooks, canDeleteBooks, getBookCoverOrThumbnailUrl, type Book } from "@/lib/api";
+import { fetchBooks, uploadBook, deleteBook, clearToken, isAuthenticated, isAdmin, canUploadBooks, canDeleteBooks, getMe, updateMePreferences, getDisplayCoverUrl, type Book } from "@/lib/api";
 
 export default function BooksPage() {
   const router = useRouter();
@@ -14,6 +14,7 @@ export default function BooksPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [noISBNNotification, setNoISBNNotification] = useState<string | null>(null);
   const [failedThumbnailIds, setFailedThumbnailIds] = useState<Set<string>>(new Set());
+  const [useExtractedCover, setUseExtractedCover] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function handleThumbnailError(bookId: string) {
@@ -25,8 +26,11 @@ export default function BooksPage() {
       router.replace("/login");
       return;
     }
-    fetchBooks()
-      .then((list) => setBooks(Array.isArray(list) ? list : []))
+    Promise.all([getMe(), fetchBooks()])
+      .then(([me, list]) => {
+        setUseExtractedCover(me.useExtractedCover ?? false);
+        setBooks(Array.isArray(list) ? list : []);
+      })
       .catch(() => setBooks([]))
       .finally(() => setLoading(false));
   }, [router]);
@@ -67,6 +71,16 @@ export default function BooksPage() {
     }
   }
 
+  async function handleThumbnailToggle() {
+    const next = !useExtractedCover;
+    try {
+      const me = await updateMePreferences({ useExtractedCover: next });
+      setUseExtractedCover(me.useExtractedCover);
+    } catch {
+      // keep current state on error
+    }
+  }
+
   function handleLogout() {
     clearToken();
     router.replace("/login");
@@ -90,7 +104,20 @@ export default function BooksPage() {
           <h1 className="text-xl font-semibold text-stone-900 dark:text-stone-100">
             <span className="text-accent">My Books</span>
           </h1>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="flex items-center gap-2 cursor-pointer select-none text-sm text-stone-700 dark:text-stone-300">
+              <span className="relative inline-block w-10 h-6 rounded-full">
+                <input
+                  type="checkbox"
+                  checked={useExtractedCover}
+                  onChange={handleThumbnailToggle}
+                  className="sr-only peer"
+                />
+                <span className="absolute inset-0 rounded-full bg-stone-300 dark:bg-stone-600 peer-checked:bg-accent transition-colors" />
+                <span className="absolute left-1 top-1 w-4 h-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-4" />
+              </span>
+              <span>Extracted thumbnail</span>
+            </label>
             {isAdmin() && (
               <Link
                 href="/users"
@@ -144,15 +171,15 @@ export default function BooksPage() {
         ) : (
           <ul className="grid gap-4 sm:grid-cols-2">
             {bookList.map((book) => (
-              <li key={book.id}>
+              <li key={book.id} className="min-h-[132px]">
                 <Link
                   href={`/books/${book.id}`}
-                  className="block rounded-xl border-l-4 border-l-accent border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 p-4 shadow-sm hover:shadow-md hover:border-accent/50 transition-all"
+                  className="block h-full min-h-[132px] rounded-xl border-l-4 border-l-accent border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 p-4 shadow-sm hover:shadow-md hover:border-accent/50 transition-all"
                 >
-                  <div className="flex gap-4">
-                    {getBookCoverOrThumbnailUrl(book.thumbnailUrl ?? book.coverUrl) && !failedThumbnailIds.has(book.id) ? (
+                  <div className="flex gap-4 h-full">
+                    {getDisplayCoverUrl(book, useExtractedCover) && !failedThumbnailIds.has(book.id) ? (
                       <img
-                        src={getBookCoverOrThumbnailUrl(book.thumbnailUrl ?? book.coverUrl)!}
+                        src={getDisplayCoverUrl(book, useExtractedCover)!}
                         alt=""
                         onError={() => handleThumbnailError(book.id)}
                         className="h-24 w-16 rounded object-cover shrink-0 bg-accent-muted/30 dark:bg-accent-muted/20 ring-1 ring-accent/20"
@@ -162,21 +189,27 @@ export default function BooksPage() {
                         {book.originalName || book.format}
                       </div>
                     )}
-                    <div className="min-w-0 flex-1">
-                      <h2 className="font-medium text-stone-900 dark:text-stone-100 break-words">
+                    <div className="min-w-0 flex-1 flex flex-col">
+                      <h2
+                        className="font-medium text-stone-900 dark:text-stone-100 truncate"
+                        title={book.title}
+                      >
                         {book.title}
                       </h2>
                       {book.authors?.length ? (
-                        <p className="text-sm text-accent-muted dark:text-accent-muted break-words line-clamp-2">
+                        <p
+                          className="text-sm text-accent-muted dark:text-accent-muted truncate mt-0.5"
+                          title={book.authors.join(", ")}
+                        >
                           {book.authors.join(", ")}
                         </p>
                       ) : null}
                       {book.uploadedByEmail ? (
-                        <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
+                        <p className="mt-1 text-xs text-stone-500 dark:text-stone-400 truncate">
                           Uploaded by {book.uploadedByEmail}
                         </p>
                       ) : null}
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <div className="mt-auto pt-2 flex flex-wrap items-center gap-2">
                         <span className="inline-block text-xs font-medium uppercase px-2 py-0.5 rounded bg-stone-600 dark:bg-stone-500 text-white">
                           {book.format}
                         </span>

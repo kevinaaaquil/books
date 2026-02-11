@@ -17,6 +17,18 @@ export function getBookCoverOrThumbnailUrl(url: string | undefined): string | un
   return url;
 }
 
+/** Display URL for a book's cover: uses extracted cover when preference is true and book has one, else API thumbnail/cover. */
+export function getDisplayCoverUrl(
+  book: Book,
+  useExtractedCover: boolean
+): string | undefined {
+  const raw =
+    useExtractedCover && book.extractedCoverUrl
+      ? book.extractedCoverUrl
+      : book.thumbnailUrl ?? book.coverUrl;
+  return getBookCoverOrThumbnailUrl(raw);
+}
+
 export type Book = {
   id: string;
   title: string;
@@ -36,6 +48,7 @@ export type Book = {
   format: string;
   originalName: string;
   uploadedByEmail?: string;
+  extractedCoverUrl?: string;
   createdAt: string;
 };
 
@@ -43,6 +56,7 @@ export type User = {
   id: string;
   email: string;
   role: string;
+  useExtractedCover?: boolean;
   createdAt: string;
 };
 
@@ -125,6 +139,24 @@ export async function login(email: string, password: string): Promise<{ token: s
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Login failed");
   return data;
+}
+
+export async function getMe(): Promise<User> {
+  const res = await authFetch("/api/me");
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { error?: string }).error || "Failed to load profile");
+  return data as User;
+}
+
+export async function updateMePreferences(prefs: { useExtractedCover: boolean }): Promise<User> {
+  const res = await authFetch("/api/me/preferences", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(prefs),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { error?: string }).error || "Failed to update preference");
+  return data as User;
 }
 
 export const USER_ROLES = ["viewer", "editor", "write_only"] as const;
@@ -215,7 +247,7 @@ export async function refreshBookMetadata(id: string, isbn?: string): Promise<Bo
   const res = await authFetch(`/api/books/${id}/refresh-metadata`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(isbn != null && isbn !== "" ? { isbn: isbn.trim() } : {}),
+    body: JSON.stringify(isbn != null && isbn !== "" ? { isbn: isbn.trim().replace(/-/g, "") } : {}),
   });
   const text = await res.text();
   if (!res.ok) {

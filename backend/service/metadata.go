@@ -57,7 +57,7 @@ type BookMetadata struct {
 
 // FetchMetadataByISBN fetches book metadata from Google Books API by ISBN.
 func FetchMetadataByISBN(isbn string) (*BookMetadata, error) {
-	isbn = strings.TrimSpace(isbn)
+	isbn = strings.ReplaceAll(strings.TrimSpace(isbn), "-", "")
 	if isbn == "" {
 		return nil, fmt.Errorf("isbn is required")
 	}
@@ -108,7 +108,7 @@ func FetchMetadataByISBN(isbn string) (*BookMetadata, error) {
 	// Use Open Library covers by ISBN (no captcha); Google Books image URLs often require captcha
 	if meta.ISBN != "" {
 		meta.CoverURL = openLibraryCoverURL(meta.ISBN, "L")
-		meta.ThumbnailURL = openLibraryCoverURL(meta.ISBN, "S")
+		meta.ThumbnailURL = openLibraryCoverURL(meta.ISBN, "M")
 	}
 	meta.Preface = strings.TrimSpace(vi.Description)
 	return meta, nil

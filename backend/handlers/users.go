@@ -31,10 +31,11 @@ type CreateUserResponse struct {
 }
 
 type UserResponse struct {
-	ID        string `json:"id"`
-	Email     string `json:"email"`
-	Role      string `json:"role"`
-	CreatedAt string `json:"createdAt"`
+	ID                 string `json:"id"`
+	Email              string `json:"email"`
+	Role               string `json:"role"`
+	UseExtractedCover  bool   `json:"useExtractedCover"`
+	CreatedAt          string `json:"createdAt"`
 }
 
 type UpdateUserRequest struct {
@@ -114,12 +115,17 @@ func (h *UsersHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type PatchMePreferencesRequest struct {
+	UseExtractedCover *bool `json:"useExtractedCover"`
+}
+
 func userToResponse(u *models.User) UserResponse {
 	return UserResponse{
-		ID:        u.ID.Hex(),
-		Email:     u.Email,
-		Role:      u.Role,
-		CreatedAt: u.CreatedAt.Format(time.RFC3339),
+		ID:                u.ID.Hex(),
+		Email:             u.Email,
+		Role:              u.Role,
+		UseExtractedCover: u.UseExtractedCover,
+		CreatedAt:         u.CreatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -249,4 +255,53 @@ func (h *UsersHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// GetMe returns the current user's profile (id, email, role, useExtractedCover). Requires auth.
+func (h *UsersHandler) GetMe(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, ok := middleware.UserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	user, err := h.DB.UserByID(r.Context(), userID)
+	if err != nil || user == nil {
+		http.Error(w, `{"error":"user not found"}`, http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(userToResponse(user))
+}
+
+// PatchMePreferences updates the current user's preferences (e.g. useExtractedCover). Body: { "useExtractedCover": true|false }. Persisted in MongoDB.
+func (h *UsersHandler) PatchMePreferences(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch && r.Method != http.MethodPut {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, ok := middleware.UserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var req PatchMePreferencesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
+		return
+	}
+	if req.UseExtractedCover == nil {
+		http.Error(w, `{"error":"useExtractedCover required"}`, http.StatusBadRequest)
+		return
+	}
+	if err := h.DB.UpdateUserUseExtractedCover(r.Context(), userID, *req.UseExtractedCover); err != nil {
+		http.Error(w, `{"error":"failed to update preference"}`, http.StatusInternalServerError)
+		return
+	}
+	user, _ := h.DB.UserByID(r.Context(), userID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(userToResponse(user))
 }

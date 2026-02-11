@@ -16,7 +16,8 @@ type Book struct {
 	PageCount     int                `bson:"pageCount,omitempty" json:"pageCount,omitempty"`
 	CoverURL      string             `bson:"coverUrl,omitempty" json:"coverUrl,omitempty"`
 	ThumbnailURL  string             `bson:"thumbnailUrl,omitempty" json:"thumbnailUrl,omitempty"`
-	CoverS3Key    string             `bson:"coverS3Key,omitempty" json:"-"` // extracted from EPUB, served via /api/books/:id/cover
+	CoverS3Key       string             `bson:"coverS3Key,omitempty" json:"-"` // extracted from EPUB, served via /api/books/:id/cover
+	ExtractedCoverURL string            `bson:"-" json:"extractedCoverUrl,omitempty"` // set when serializing if CoverS3Key set; lets frontend toggle
 	Edition       string             `bson:"edition,omitempty" json:"edition,omitempty"`
 	Preface       string             `bson:"preface,omitempty" json:"preface,omitempty"`
 	Category      string             `bson:"category,omitempty" json:"category,omitempty"`

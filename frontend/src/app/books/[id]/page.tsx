@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { fetchBook, getDownloadUrl, deleteBook, refreshBookMetadata, isAuthenticated, canDeleteBooks, canRefreshMetadata, getBookCoverOrThumbnailUrl } from "@/lib/api";
+import { fetchBook, getDownloadUrl, deleteBook, refreshBookMetadata, isAuthenticated, canDeleteBooks, canRefreshMetadata, getMe, updateMePreferences, getDisplayCoverUrl } from "@/lib/api";
 
 export default function BookDetailPage() {
   const router = useRouter();
@@ -18,6 +18,7 @@ export default function BookDetailPage() {
   const [refreshIsbn, setRefreshIsbn] = useState("");
   const [showOverwriteWarning, setShowOverwriteWarning] = useState(false);
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  const [useExtractedCover, setUseExtractedCover] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -26,11 +27,24 @@ export default function BookDetailPage() {
     }
     if (!id) return;
     setThumbnailFailed(false);
-    fetchBook(id)
-      .then(setBook)
+    Promise.all([getMe(), fetchBook(id)])
+      .then(([me, b]) => {
+        setUseExtractedCover(me.useExtractedCover ?? false);
+        setBook(b);
+      })
       .catch(() => setBook(null))
       .finally(() => setLoading(false));
   }, [id, router]);
+
+  async function handleThumbnailToggle() {
+    const next = !useExtractedCover;
+    try {
+      const me = await updateMePreferences({ useExtractedCover: next });
+      setUseExtractedCover(me.useExtractedCover);
+    } catch {
+      // keep current state on error
+    }
+  }
 
   async function handleDownload() {
     if (!id) return;
@@ -56,9 +70,14 @@ export default function BookDetailPage() {
     }
   }
 
+  function normalizeIsbn(isbn: string) {
+    return isbn.replace(/-/g, "");
+  }
+
   function handleRefreshClick() {
     const isbnInput = refreshIsbn.trim();
-    if (isbnInput && isbnInput !== book?.isbn) {
+    const normalizedInput = normalizeIsbn(isbnInput);
+    if (isbnInput && normalizedInput !== normalizeIsbn(book?.isbn ?? "")) {
       setShowOverwriteWarning(true);
       return;
     }
@@ -103,22 +122,35 @@ export default function BookDetailPage() {
   return (
     <div className="min-h-screen bg-accent-soft dark:bg-accent-soft">
       <header className="border-b-2 border-accent/20 bg-white dark:bg-stone-800 shadow-sm">
-        <div className="max-w-3xl mx-auto px-4 py-4">
+        <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between gap-4 flex-wrap">
           <Link
             href="/books"
             className="text-sm font-medium text-accent hover:underline"
           >
             ← My Books
           </Link>
+          <label className="flex items-center gap-2 cursor-pointer select-none text-sm text-stone-700 dark:text-stone-300">
+            <span className="relative inline-block w-10 h-6 rounded-full">
+              <input
+                type="checkbox"
+                checked={useExtractedCover}
+                onChange={handleThumbnailToggle}
+                className="sr-only peer"
+              />
+              <span className="absolute inset-0 rounded-full bg-stone-300 dark:bg-stone-600 peer-checked:bg-accent transition-colors" />
+              <span className="absolute left-1 top-1 w-4 h-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-4" />
+            </span>
+            <span>Extracted thumbnail</span>
+          </label>
         </div>
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-8">
         <div className="rounded-xl border-2 border-accent/20 bg-white dark:bg-stone-800 shadow-lg shadow-accent/5 overflow-hidden">
           <div className="p-6 sm:p-8 flex flex-col sm:flex-row gap-6">
-            {getBookCoverOrThumbnailUrl(book.thumbnailUrl ?? book.coverUrl) && !thumbnailFailed ? (
+            {getDisplayCoverUrl(book, useExtractedCover) && !thumbnailFailed ? (
               <img
-                src={getBookCoverOrThumbnailUrl(book.thumbnailUrl ?? book.coverUrl)!}
+                src={getDisplayCoverUrl(book, useExtractedCover)!}
                 alt=""
                 onError={() => setThumbnailFailed(true)}
                 className="w-40 h-60 rounded-lg object-cover shrink-0 mx-auto sm:mx-0 bg-accent-muted/30 dark:bg-accent-muted/20 ring-2 ring-accent/30"
@@ -242,6 +274,15 @@ export default function BookDetailPage() {
                       placeholder={book.isbn || "Enter ISBN"}
                       className="rounded-lg border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-700 px-3 py-2 text-sm text-stone-900 dark:text-stone-100 w-40"
                     />
+                    <a
+                      href={`https://www.google.com/search?q=${encodeURIComponent((book?.title ?? "") + " epub isbn")}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-lg border border-stone-300 dark:border-stone-600 bg-stone-100 dark:bg-stone-600 px-2.5 py-2 text-xs text-stone-600 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-500 shrink-0"
+                      title={`Search "${book?.title ?? ""} ISBN"`}
+                    >
+                      Search
+                    </a>
                     <button
                       onClick={handleRefreshClick}
                       disabled={refreshing || (!refreshIsbn.trim() && !book.isbn)}
@@ -274,7 +315,7 @@ export default function BookDetailPage() {
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => doRefreshMetadata(refreshIsbn.trim())}
+                onClick={() => doRefreshMetadata(refreshIsbn.trim() || undefined)}
                 disabled={refreshing}
                 className="flex-1 rounded-lg bg-accent hover:bg-accent-hover text-stone-900 font-medium py-2 disabled:opacity-50"
               >
