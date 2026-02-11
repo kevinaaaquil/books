@@ -3,10 +3,11 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { fetchBooks, uploadBook, deleteBook, clearToken, isAuthenticated, isAdmin, canUploadBooks, canDeleteBooks, getMe, updateMePreferences, getDisplayCoverUrl, type Book } from "@/lib/api";
+import { fetchBooks, uploadBook, deleteBook, clearToken, isAuthenticated, isAdmin, getMe, updateMePreferences, getDisplayCoverUrl, type Book, type User } from "@/lib/api";
 
 export default function BooksPage() {
   const router = useRouter();
+  const [me, setMe] = useState<User | null>(null);
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -16,6 +17,9 @@ export default function BooksPage() {
   const [failedThumbnailIds, setFailedThumbnailIds] = useState<Set<string>>(new Set());
   const [useExtractedCover, setUseExtractedCover] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const canUpload = me?.role === "admin" || me?.role === "editor";
+  const canDelete = me?.role === "admin";
 
   function handleThumbnailError(bookId: string) {
     setFailedThumbnailIds((prev) => new Set(prev).add(bookId));
@@ -27,8 +31,9 @@ export default function BooksPage() {
       return;
     }
     Promise.all([getMe(), fetchBooks()])
-      .then(([me, list]) => {
-        setUseExtractedCover(me.useExtractedCover ?? false);
+      .then(([user, list]) => {
+        setMe(user);
+        setUseExtractedCover(user.useExtractedCover ?? false);
         setBooks(Array.isArray(list) ? list : []);
       })
       .catch(() => setBooks([]))
@@ -137,7 +142,7 @@ export default function BooksPage() {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 py-8">
-        {canUploadBooks() && (
+        {canUpload && (
           <div className="mb-6 flex flex-wrap items-center gap-4 rounded-xl bg-white dark:bg-stone-800 border border-accent/20 p-4">
             <input
               ref={fileInputRef}
@@ -213,7 +218,7 @@ export default function BooksPage() {
                         <span className="inline-block text-xs font-medium uppercase px-2 py-0.5 rounded bg-stone-600 dark:bg-stone-500 text-white">
                           {book.format}
                         </span>
-                        {canDeleteBooks() && (
+                        {canDelete && (
                           <button
                             type="button"
                             onClick={(e) => handleDelete(e, book.id)}

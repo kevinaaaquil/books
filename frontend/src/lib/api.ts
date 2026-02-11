@@ -102,7 +102,7 @@ export function canReadBooks(): boolean {
 /** Can upload books. */
 export function canUploadBooks(): boolean {
   const r = getRole();
-  return r === "admin" || r === "editor" || r === "write_only";
+  return r === "admin" || r === "editor";
 }
 
 /** Can delete books. */
@@ -145,7 +145,9 @@ export async function getMe(): Promise<User> {
   const res = await authFetch("/api/me");
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data as { error?: string }).error || "Failed to load profile");
-  return data as User;
+  const me = data as User;
+  if (me.role != null) setRole(me.role);
+  return me;
 }
 
 export async function updateMePreferences(prefs: { useExtractedCover: boolean }): Promise<User> {
@@ -159,7 +161,7 @@ export async function updateMePreferences(prefs: { useExtractedCover: boolean })
   return data as User;
 }
 
-export const USER_ROLES = ["viewer", "editor", "write_only"] as const;
+export const USER_ROLES = ["viewer", "editor"] as const;
 export type CreateUserRole = (typeof USER_ROLES)[number];
 
 export async function createUser(email: string, password: string, role: string): Promise<{ id: string; email: string; role: string }> {

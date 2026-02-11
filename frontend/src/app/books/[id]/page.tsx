@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { fetchBook, getDownloadUrl, deleteBook, refreshBookMetadata, isAuthenticated, canDeleteBooks, canRefreshMetadata, getMe, updateMePreferences, getDisplayCoverUrl } from "@/lib/api";
+import { fetchBook, getDownloadUrl, deleteBook, refreshBookMetadata, isAuthenticated, getMe, updateMePreferences, getDisplayCoverUrl, type User } from "@/lib/api";
 
 export default function BookDetailPage() {
   const router = useRouter();
   const params = useParams();
   const id = params?.id as string;
+  const [me, setMe] = useState<User | null>(null);
   const [book, setBook] = useState<Awaited<ReturnType<typeof fetchBook>> | null>(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
@@ -20,6 +21,9 @@ export default function BookDetailPage() {
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
   const [useExtractedCover, setUseExtractedCover] = useState(false);
 
+  const canDelete = me?.role === "admin";
+  const canRefresh = me?.role === "admin" || me?.role === "editor";
+
   useEffect(() => {
     if (!isAuthenticated()) {
       router.replace("/login");
@@ -28,8 +32,9 @@ export default function BookDetailPage() {
     if (!id) return;
     setThumbnailFailed(false);
     Promise.all([getMe(), fetchBook(id)])
-      .then(([me, b]) => {
-        setUseExtractedCover(me.useExtractedCover ?? false);
+      .then(([user, b]) => {
+        setMe(user);
+        setUseExtractedCover(user.useExtractedCover ?? false);
         setBook(b);
       })
       .catch(() => setBook(null))
@@ -249,7 +254,7 @@ export default function BookDetailPage() {
                 >
                   {downloading ? "Preparing…" : "Download book"}
                 </button>
-                {canDeleteBooks() && (
+                {canDelete && (
                   <button
                     onClick={handleDelete}
                     disabled={deleting}
@@ -260,7 +265,7 @@ export default function BookDetailPage() {
                 )}
               </div>
 
-              {canRefreshMetadata() && (
+              {canRefresh && (
                 <div className="mt-6 pt-6 border-t border-stone-200 dark:border-stone-600">
                   <h2 className="text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">Refresh metadata</h2>
                   <p className="text-xs text-stone-500 dark:text-stone-400 mb-2">

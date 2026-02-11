@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   isAuthenticated,
-  isAdmin,
   clearToken,
   listUsers,
   createUser,
   updateUser,
   deleteUser,
+  getMe,
+  setRole,
   USER_ROLES,
   type User,
 } from "@/lib/api";
@@ -41,12 +42,19 @@ export default function ManageUsersPage() {
       router.replace("/login");
       return;
     }
-    if (!isAdmin()) {
-      router.replace("/books");
-      return;
-    }
-    listUsers()
-      .then(setUsers)
+    // Use server role so any admin can see the page (don't rely only on localStorage)
+    getMe()
+      .then((me) => {
+        if (me.role != null) setRole(me.role);
+        if (me.role !== "admin") {
+          router.replace("/books");
+          return;
+        }
+        return listUsers();
+      })
+      .then((list) => {
+        if (Array.isArray(list)) setUsers(list);
+      })
       .catch(() => setUsers([]))
       .finally(() => setLoading(false));
   }, [router]);
@@ -99,6 +107,13 @@ export default function ManageUsersPage() {
       const list = await listUsers();
       setUsers(list);
       setEditUser(null);
+      // Sync role from server so UI updates when current user's role was changed
+      getMe()
+        .then((m) => {
+          if (m.role != null) setRole(m.role);
+          if (m.role !== "admin") router.replace("/books");
+        })
+        .catch(() => {});
     } catch (err) {
       setEditError(err instanceof Error ? err.message : "Failed to update user");
     } finally {
