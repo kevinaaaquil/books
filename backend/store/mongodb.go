@@ -37,6 +37,14 @@ func (db *DB) Books() *mongo.Collection {
 	return db.Database.Collection("books")
 }
 
+func (db *DB) EmailConfig() *mongo.Collection {
+	return db.Database.Collection("kindle_config")
+}
+
+func (db *DB) EmailLogs() *mongo.Collection {
+	return db.Database.Collection("email_logs")
+}
+
 func (db *DB) Disconnect(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

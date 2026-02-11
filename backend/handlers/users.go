@@ -53,7 +53,7 @@ func roleValid(role string) bool {
 	return false
 }
 
-// CreateUser creates a new user. Only admin can call. Role must be viewer, editor, or write_only (not admin).
+// CreateUser creates a new user. Only admin can call. Role must be viewer, editor, or guest (not admin).
 func (h *UsersHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -78,7 +78,7 @@ func (h *UsersHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !roleValid(role) {
-		http.Error(w, `{"error":"invalid role; use viewer, editor, or write_only"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"invalid role; use viewer, editor, or guest"}`, http.StatusBadRequest)
 		return
 	}
 	existing, err := h.DB.UserByEmail(r.Context(), req.Email)

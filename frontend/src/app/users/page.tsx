@@ -15,11 +15,13 @@ import {
   USER_ROLES,
   type User,
 } from "@/lib/api";
+import { ProfileMenu } from "@/components/ProfileMenu";
 
-const ALL_ROLES = ["admin", ...USER_ROLES];
+const ALL_ROLES = ["admin", "viewer", "editor", "guest"];
 
 export default function ManageUsersPage() {
   const router = useRouter();
+  const [me, setMe] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
@@ -44,9 +46,10 @@ export default function ManageUsersPage() {
     }
     // Use server role so any admin can see the page (don't rely only on localStorage)
     getMe()
-      .then((me) => {
-        if (me.role != null) setRole(me.role);
-        if (me.role !== "admin") {
+      .then((user) => {
+        setMe(user);
+        if (user.role != null) setRole(user.role);
+        if (user.role !== "admin") {
           router.replace("/books");
           return;
         }
@@ -157,6 +160,12 @@ export default function ManageUsersPage() {
             >
               ← Books
             </Link>
+            <Link
+              href="/kindle-setup"
+              className="text-sm font-medium px-3 py-1.5 rounded-lg border border-accent/50 text-accent hover:bg-accent/10 transition-colors"
+            >
+              Kindle setup
+            </Link>
             <button
               type="button"
               onClick={() => setAddOpen(true)}
@@ -164,12 +173,7 @@ export default function ManageUsersPage() {
             >
               Add user
             </button>
-            <button
-              onClick={handleLogout}
-              className="text-sm text-accent-muted hover:text-accent font-medium transition-colors"
-            >
-              Log out
-            </button>
+            <ProfileMenu email={me?.email ?? ""} onLogout={handleLogout} />
           </div>
         </div>
       </header>

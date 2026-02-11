@@ -70,6 +70,30 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(LoginResponse{Token: token, Email: user.Email, Role: role})
 }
 
+// LoginAsGuest returns a JWT for a guest user (no password). Requires at least one user with role guest to exist.
+func (h *AuthHandler) LoginAsGuest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	user, err := h.DB.UserByRole(r.Context(), models.RoleGuest)
+	if err != nil {
+		http.Error(w, `{"error":"login failed"}`, http.StatusInternalServerError)
+		return
+	}
+	if user == nil {
+		http.Error(w, `{"error":"guest access not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+	token, err := h.createToken(user.ID.Hex(), user.Email, models.RoleGuest)
+	if err != nil {
+		http.Error(w, `{"error":"could not create token"}`, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(LoginResponse{Token: token, Email: user.Email, Role: models.RoleGuest})
+}
+
 func (h *AuthHandler) createToken(userID, email, role string) (string, error) {
 	claims := &middleware.Claims{
 		UserID: userID,

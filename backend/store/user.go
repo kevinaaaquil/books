@@ -32,6 +32,19 @@ func (db *DB) UserByEmail(ctx context.Context, email string) (*models.User, erro
 	return &u, nil
 }
 
+// UserByRole returns one user with the given role, or nil if none.
+func (db *DB) UserByRole(ctx context.Context, role string) (*models.User, error) {
+	var u models.User
+	err := db.Users().FindOne(ctx, bson.M{"role": role}).Decode(&u)
+	if err == mongo.ErrNoDocuments {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
 func (db *DB) CreateUser(ctx context.Context, user *models.User) (primitive.ObjectID, error) {
 	res, err := db.Users().InsertOne(ctx, user, options.InsertOne())
 	if err != nil {

@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { fetchBooks, uploadBook, deleteBook, clearToken, isAuthenticated, isAdmin, getMe, updateMePreferences, getDisplayCoverUrl, type Book, type User } from "@/lib/api";
+import { ProfileMenu } from "@/components/ProfileMenu";
 
 export default function BooksPage() {
   const router = useRouter();
@@ -123,6 +124,12 @@ export default function BooksPage() {
               </span>
               <span>Extracted thumbnail</span>
             </label>
+            <Link
+              href="/kindle-setup"
+              className="text-sm font-medium px-3 py-1.5 rounded-lg border border-accent/50 text-accent hover:bg-accent/10 transition-colors"
+            >
+              Kindle setup
+            </Link>
             {isAdmin() && (
               <Link
                 href="/users"
@@ -131,12 +138,7 @@ export default function BooksPage() {
                 Manage users
               </Link>
             )}
-            <button
-              onClick={handleLogout}
-              className="text-sm text-accent-muted hover:text-accent font-medium transition-colors"
-            >
-              Log out
-            </button>
+            <ProfileMenu email={me?.email ?? ""} onLogout={handleLogout} />
           </div>
         </div>
       </header>

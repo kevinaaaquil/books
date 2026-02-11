@@ -28,5 +28,6 @@ type Book struct {
 	S3Key            string             `bson:"s3Key" json:"-"`                         // object key in S3
 	OriginalName     string             `bson:"originalName" json:"originalName"`
 	UploadedByEmail  string             `bson:"uploadedByEmail,omitempty" json:"uploadedByEmail,omitempty"`
+	ViewByGuest      bool               `bson:"viewByGuest" json:"viewByGuest"` // when true, guests can see this book (demo)
 	CreatedAt        time.Time          `bson:"createdAt" json:"createdAt"`
 }

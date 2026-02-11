@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { login, setToken, setRole } from "@/lib/api";
+import { login, loginAsGuest, setToken, setRole } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -10,6 +10,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [guestLoading, setGuestLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -25,6 +26,23 @@ export default function LoginPage() {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleViewAsGuest(e: React.MouseEvent) {
+    e.preventDefault();
+    setError("");
+    setGuestLoading(true);
+    try {
+      const { token, role } = await loginAsGuest();
+      setToken(token);
+      if (role) setRole(role);
+      router.push("/books");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Guest access not available");
+    } finally {
+      setGuestLoading(false);
     }
   }
 
@@ -73,6 +91,19 @@ export default function LoginPage() {
           >
             {loading ? "Signing in…" : "Sign in"}
           </button>
+          <div className="mt-4 pt-4 border-t border-stone-200 dark:border-stone-600">
+            <button
+              type="button"
+              onClick={handleViewAsGuest}
+              disabled={guestLoading || loading}
+              className="w-full rounded-lg border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-700 text-stone-700 dark:text-stone-300 font-medium py-2.5 transition-colors hover:bg-stone-50 dark:hover:bg-stone-600 disabled:opacity-50"
+            >
+              {guestLoading ? "Entering…" : "View as guest"}
+            </button>
+            <p className="text-xs text-stone-500 dark:text-stone-400 mt-2 text-center">
+              Same privileges as a guest: only demo books are visible.
+            </p>
+          </div>
         </form>
       </div>
     </div>

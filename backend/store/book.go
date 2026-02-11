@@ -30,6 +30,20 @@ func (db *DB) AllBooks(ctx context.Context) ([]models.Book, error) {
 	return books, nil
 }
 
+// BooksVisibleToGuest returns books where viewByGuest is true (for guest-role users).
+func (db *DB) BooksVisibleToGuest(ctx context.Context) ([]models.Book, error) {
+	cur, err := db.Books().Find(ctx, bson.M{"viewByGuest": true}, options.Find().SetSort(bson.M{"createdAt": -1}))
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+	var books []models.Book
+	if err := cur.All(ctx, &books); err != nil {
+		return nil, err
+	}
+	return books, nil
+}
+
 func (db *DB) BookByID(ctx context.Context, id primitive.ObjectID) (*models.Book, error) {
 	var book models.Book
 	err := db.Books().FindOne(ctx, bson.M{"_id": id}).Decode(&book)
@@ -68,5 +82,11 @@ func (db *DB) UpdateBookMetadata(ctx context.Context, id primitive.ObjectID, boo
 		"ratingCount":    book.RatingCount,
 	}
 	_, err := db.Books().UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": update})
+	return err
+}
+
+// UpdateBookViewByGuest sets viewByGuest for a book (admin only).
+func (db *DB) UpdateBookViewByGuest(ctx context.Context, id primitive.ObjectID, viewByGuest bool) error {
+	_, err := db.Books().UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"viewByGuest": viewByGuest}})
 	return err
 }

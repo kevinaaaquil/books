@@ -49,6 +49,7 @@ export type Book = {
   originalName: string;
   uploadedByEmail?: string;
   extractedCoverUrl?: string;
+  viewByGuest?: boolean;
   createdAt: string;
 };
 
@@ -93,10 +94,10 @@ export function isAdmin(): boolean {
   return getRole() === "admin";
 }
 
-/** Can list, view, and download books. */
+/** Can list, view, and download books (guests see only books marked viewByGuest). */
 export function canReadBooks(): boolean {
   const r = getRole();
-  return r === "admin" || r === "editor" || r === "viewer";
+  return r === "admin" || r === "editor" || r === "viewer" || r === "guest";
 }
 
 /** Can upload books. */
@@ -141,6 +142,18 @@ export async function login(email: string, password: string): Promise<{ token: s
   return data;
 }
 
+/** Sign in as guest (same privileges as a guest user: only books marked "View by guest"). */
+export async function loginAsGuest(): Promise<{ token: string; email: string; role?: string }> {
+  const res = await fetch(`${getApiBaseUrl()}/api/auth/guest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Guest access not available");
+  return data;
+}
+
 export async function getMe(): Promise<User> {
   const res = await authFetch("/api/me");
   const data = await res.json().catch(() => ({}));
@@ -161,7 +174,7 @@ export async function updateMePreferences(prefs: { useExtractedCover: boolean })
   return data as User;
 }
 
-export const USER_ROLES = ["viewer", "editor"] as const;
+export const USER_ROLES = ["viewer", "editor", "guest"] as const;
 export type CreateUserRole = (typeof USER_ROLES)[number];
 
 export async function createUser(email: string, password: string, role: string): Promise<{ id: string; email: string; role: string }> {
@@ -264,6 +277,44 @@ export async function refreshBookMetadata(id: string, isbn?: string): Promise<Bo
   return JSON.parse(text) as Book;
 }
 
+/** Send book to Kindle. Throws with { message, code?: 'KINDLE_CONFIG_REQUIRED' } on failure. */
+export async function sendToKindle(bookId: string): Promise<{ message: string; kindleMail: string }> {
+  const res = await authFetch(`/api/books/${bookId}/send-to-kindle`, { method: "POST" });
+  const text = await res.text();
+  if (!res.ok) {
+    try {
+      const data = JSON.parse(text) as { error?: string; code?: string };
+      const err = new Error(data.error || "Failed to send to Kindle") as Error & { code?: string };
+      err.code = data.code;
+      throw err;
+    } catch (e) {
+      if (e instanceof Error && "code" in e) throw e;
+      throw new Error("Failed to send to Kindle");
+    }
+  }
+  return JSON.parse(text) as { message: string; kindleMail: string };
+}
+
+/** Toggle whether a book is visible to guests (admin only). */
+export async function patchBookViewByGuest(id: string, viewByGuest: boolean): Promise<Book> {
+  const res = await authFetch(`/api/books/${id}/view-by-guest`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ viewByGuest }),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    try {
+      const data = JSON.parse(text) as { error?: string };
+      throw new Error(data.error || "Failed to update");
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      throw new Error("Failed to update");
+    }
+  }
+  return JSON.parse(text) as Book;
+}
+
 export async function deleteBook(id: string): Promise<void> {
   const res = await authFetch(`/api/books/${id}`, { method: "DELETE" });
   if (!res.ok) {
@@ -276,6 +327,38 @@ export async function deleteBook(id: string): Promise<void> {
       throw new Error("Failed to delete book");
     }
   }
+}
+
+export type EmailConfig = {
+  appSpecificPassword: string;
+  icloudMail: string;
+  senderMail: string;
+  kindleMail: string;
+};
+
+export async function getEmailConfig(): Promise<EmailConfig> {
+  const res = await authFetch("/api/email-config");
+  if (!res.ok) throw new Error("Failed to load Kindle config");
+  return res.json();
+}
+
+export async function saveEmailConfig(config: EmailConfig): Promise<EmailConfig> {
+  const res = await authFetch("/api/email-config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    try {
+      const data = JSON.parse(text) as { error?: string };
+      throw new Error(data.error || "Failed to save Kindle config");
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      throw new Error("Failed to save Kindle config");
+    }
+  }
+  return JSON.parse(text) as EmailConfig;
 }
 
 export async function uploadBook(file: File): Promise<{ id: string; title: string; noISBNFound?: boolean }> {

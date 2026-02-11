@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { fetchBook, getDownloadUrl, deleteBook, refreshBookMetadata, isAuthenticated, getMe, updateMePreferences, getDisplayCoverUrl, type User } from "@/lib/api";
+import { fetchBook, getDownloadUrl, deleteBook, refreshBookMetadata, patchBookViewByGuest, sendToKindle, isAuthenticated, getMe, updateMePreferences, getDisplayCoverUrl, isAdmin, type User } from "@/lib/api";
 
 export default function BookDetailPage() {
   const router = useRouter();
@@ -20,9 +20,29 @@ export default function BookDetailPage() {
   const [showOverwriteWarning, setShowOverwriteWarning] = useState(false);
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
   const [useExtractedCover, setUseExtractedCover] = useState(false);
+  const [viewByGuestToggling, setViewByGuestToggling] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const optionsRef = useRef<HTMLDivElement>(null);
+  const [sendingToKindle, setSendingToKindle] = useState(false);
+  const [sendToKindleError, setSendToKindleError] = useState("");
+  const [showKindleSetupModal, setShowKindleSetupModal] = useState(false);
+  const [sentToKindleToast, setSentToKindleToast] = useState<string | null>(null);
 
   const canDelete = me?.role === "admin";
   const canRefresh = me?.role === "admin" || me?.role === "editor";
+  const canToggleViewByGuest = isAdmin();
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (optionsRef.current && !optionsRef.current.contains(e.target as Node)) {
+        setOptionsOpen(false);
+      }
+    }
+    if (optionsOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [optionsOpen]);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -87,6 +107,42 @@ export default function BookDetailPage() {
       return;
     }
     doRefreshMetadata(isbnInput || undefined);
+  }
+
+  async function handleSendToKindle() {
+    if (!id) return;
+    setSendToKindleError("");
+    setShowKindleSetupModal(false);
+    setSendingToKindle(true);
+    try {
+      const result = await sendToKindle(id);
+      setSendToKindleError("");
+      setSentToKindleToast(result.kindleMail);
+      setTimeout(() => setSentToKindleToast(null), 3000);
+    } catch (err) {
+      const e = err as Error & { code?: string };
+      if (e.code === "KINDLE_CONFIG_REQUIRED") {
+        setShowKindleSetupModal(true);
+      } else {
+        setSendToKindleError(e.message || "Failed to send to Kindle");
+      }
+    } finally {
+      setSendingToKindle(false);
+    }
+  }
+
+  async function handleViewByGuestToggle() {
+    if (!id || !book) return;
+    const next = !book.viewByGuest;
+    setViewByGuestToggling(true);
+    try {
+      const updated = await patchBookViewByGuest(id, next);
+      setBook(updated);
+    } catch {
+      // keep current state on error
+    } finally {
+      setViewByGuestToggling(false);
+    }
   }
 
   async function doRefreshMetadata(isbn?: string) {
@@ -246,13 +302,20 @@ export default function BookDetailPage() {
                   </p>
                 </div>
               ) : null}
-              <div className="mt-6 flex flex-wrap gap-3">
+              <div className="mt-6 flex flex-wrap items-center gap-3">
                 <button
                   onClick={handleDownload}
                   disabled={downloading}
                   className="rounded-lg bg-accent hover:bg-accent-hover text-stone-900 font-medium px-4 py-2 disabled:opacity-50"
                 >
                   {downloading ? "Preparing…" : "Download book"}
+                </button>
+                <button
+                  onClick={handleSendToKindle}
+                  disabled={sendingToKindle}
+                  className="rounded-lg border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-700 px-4 py-2 text-sm font-medium text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-600 disabled:opacity-50"
+                >
+                  {sendingToKindle ? "Sending…" : "Send to Kindle"}
                 </button>
                 {canDelete && (
                   <button
@@ -263,7 +326,45 @@ export default function BookDetailPage() {
                     {deleting ? "Deleting…" : "Delete book"}
                   </button>
                 )}
+                {canToggleViewByGuest && (
+                  <div className="relative" ref={optionsRef}>
+                    <button
+                      type="button"
+                      onClick={() => setOptionsOpen((o) => !o)}
+                      className="rounded-lg border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-700 px-3 py-2 text-sm font-medium text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-600"
+                    >
+                      Options ▾
+                    </button>
+                    {optionsOpen && (
+                      <div className="absolute left-0 top-full z-10 mt-1 min-w-[200px] rounded-lg border border-stone-200 dark:border-stone-600 bg-white dark:bg-stone-800 shadow-lg py-1">
+                        <button
+                          type="button"
+                          onClick={handleViewByGuestToggle}
+                          disabled={viewByGuestToggling}
+                          className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left text-sm text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-700 disabled:opacity-50"
+                        >
+                          <span>View by guest (demo)</span>
+                          <span className="relative inline-block w-9 h-5 shrink-0 rounded-full">
+                            <span
+                              className={`absolute inset-0 rounded-full transition-colors ${
+                                book.viewByGuest ? "bg-accent" : "bg-stone-300 dark:bg-stone-600"
+                              }`}
+                            />
+                            <span
+                              className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                                book.viewByGuest ? "left-4" : "left-0.5"
+                              }`}
+                            />
+                          </span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
+              {sendToKindleError && (
+                <p className="mt-2 text-sm text-red-600 dark:text-red-400">{sendToKindleError}</p>
+              )}
 
               {canRefresh && (
                 <div className="mt-6 pt-6 border-t border-stone-200 dark:border-stone-600">
@@ -303,6 +404,48 @@ export default function BookDetailPage() {
           </div>
         </div>
       </main>
+
+      {sentToKindleToast && (
+        <div
+          className="fixed top-6 right-6 z-30 rounded-lg bg-stone-800 dark:bg-stone-700 text-white px-4 py-3 shadow-lg border border-stone-600 dark:border-stone-500 text-sm font-medium"
+          role="status"
+          aria-live="polite"
+        >
+          Sent to {sentToKindleToast}
+        </div>
+      )}
+
+      {showKindleSetupModal && (
+        <div
+          className="fixed inset-0 z-20 flex items-center justify-center p-4 bg-stone-900/50"
+          onClick={() => setShowKindleSetupModal(false)}
+        >
+          <div
+            className="bg-white dark:bg-stone-800 rounded-xl shadow-xl border border-stone-200 dark:border-stone-700 w-full max-w-sm p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100 mb-2">Set up Kindle config</h2>
+            <p className="text-sm text-stone-600 dark:text-stone-400 mb-6">
+              Set up your Kindle config to send books to your device. Add your iCloud and Kindle email in Kindle setup.
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowKindleSetupModal(false)}
+                className="flex-1 rounded-lg border border-stone-300 dark:border-stone-600 px-4 py-2 text-stone-700 dark:text-stone-300 font-medium"
+              >
+                Cancel
+              </button>
+              <Link
+                href="/kindle-setup"
+                className="flex-1 rounded-lg bg-accent hover:bg-accent-hover text-stone-900 font-medium py-2 px-4 text-center inline-block"
+              >
+                Setup Kindle
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showOverwriteWarning && (
         <div
