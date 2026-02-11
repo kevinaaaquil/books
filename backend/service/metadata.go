@@ -6,9 +6,13 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 const googleBooksBase = "https://www.googleapis.com/books/v1/volumes"
+
+// googleBooksClient has a short timeout so slow/hung responses don't block uploads.
+var googleBooksClient = &http.Client{Timeout: 15 * time.Second}
 
 // googleBooksVolumesResp is the response from GET /volumes?q=isbn:...
 type googleBooksVolumesResp struct {
@@ -64,7 +68,7 @@ func FetchMetadataByISBN(isbn string) (*BookMetadata, error) {
 	q := url.Values{}
 	q.Set("q", "isbn:"+isbn)
 	u := googleBooksBase + "?" + q.Encode()
-	resp, err := http.Get(u)
+	resp, err := googleBooksClient.Get(u)
 	if err != nil {
 		return nil, err
 	}

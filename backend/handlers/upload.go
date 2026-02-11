@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kevinaaaquil/books/backend/middleware"
@@ -101,45 +102,71 @@ func (h *UploadHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fileNameTitle := strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename))
-	noISBNFound := false
+	book.Title = fileNameTitle
+
+	var noISBNFound bool
 	if format == "epub" {
-		book.Title = fileNameTitle
-		isbn, err := utils.ExtractISBNFromMultipartFile(bytes.NewReader(fileBytes))
-		if err == nil && isbn != "" {
-			meta, err := service.FetchMetadataByISBN(isbn)
-			if err == nil {
-				if meta.Title != "" {
-					book.Title = meta.Title
-				}
-				book.Authors = meta.Authors
-				book.Publisher = meta.Publisher
-				book.PublishDate = meta.PublishDate
-				book.ISBN = meta.ISBN
-				book.PageCount = meta.PageCount
-				book.CoverURL = meta.CoverURL
-				book.ThumbnailURL = meta.ThumbnailURL
-				book.Edition = meta.Edition
-				book.Preface = meta.Preface
-				book.Category = meta.Category
-				book.Categories = meta.Categories
-				book.RatingAverage = meta.RatingAverage
-				book.RatingCount = meta.RatingCount
+		// Run metadata fetch (Google Books API) and cover extract+S3 upload in parallel to reduce latency.
+		var meta *service.BookMetadata
+		var coverS3Key string
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			isbn, err := utils.ExtractISBNFromMultipartFile(bytes.NewReader(fileBytes))
+			if err != nil || isbn == "" {
+				return
 			}
-		} else {
-			noISBNFound = true
-		}
-		// Extract cover from EPUB and upload to S3 as alternate (used when serializing book as coverUrl/thumbnail)
-		if coverBytes, coverContentType, err := utils.ExtractCoverFromEPUBBytes(fileBytes); err == nil && len(coverBytes) > 0 {
+			m, err := service.FetchMetadataByISBN(isbn)
+			if err != nil {
+				return
+			}
+			meta = m
+		}()
+
+		go func() {
+			defer wg.Done()
+			coverBytes, coverContentType, err := utils.ExtractCoverFromEPUBBytes(fileBytes)
+			if err != nil || len(coverBytes) == 0 {
+				return
+			}
 			coverExt := ".jpg"
 			if strings.Contains(coverContentType, "png") {
 				coverExt = ".png"
 			}
-			if coverKey, err := h.S3.Upload(r.Context(), "books/covers/", "cover"+coverExt, bytes.NewReader(coverBytes), coverContentType); err == nil {
-				book.CoverS3Key = coverKey
+			key, err := h.S3.Upload(r.Context(), "books/covers/", "cover"+coverExt, bytes.NewReader(coverBytes), coverContentType)
+			if err != nil {
+				return
 			}
+			coverS3Key = key
+		}()
+
+		wg.Wait()
+
+		if meta != nil {
+			if meta.Title != "" {
+				book.Title = meta.Title
+			}
+			book.Authors = meta.Authors
+			book.Publisher = meta.Publisher
+			book.PublishDate = meta.PublishDate
+			book.ISBN = meta.ISBN
+			book.PageCount = meta.PageCount
+			book.CoverURL = meta.CoverURL
+			book.ThumbnailURL = meta.ThumbnailURL
+			book.Edition = meta.Edition
+			book.Preface = meta.Preface
+			book.Category = meta.Category
+			book.Categories = meta.Categories
+			book.RatingAverage = meta.RatingAverage
+			book.RatingCount = meta.RatingCount
+		} else {
+			noISBNFound = true
 		}
-	} else {
-		book.Title = fileNameTitle
+		if coverS3Key != "" {
+			book.CoverS3Key = coverS3Key
+		}
 	}
 
 	id, err := h.DB.InsertBook(r.Context(), book)
