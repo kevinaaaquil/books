@@ -109,30 +109,25 @@ func (h *UploadHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		format = "epub"
 	}
 
-	key, err := h.S3.Upload(r.Context(), s3Prefix, header.Filename, bytes.NewReader(fileBytes), contentType)
-	if err != nil {
-		http.Error(w, `{"error":"failed to upload to storage"}`, http.StatusInternalServerError)
-		return
-	}
-
 	uploadedBy := middleware.EmailFromContext(r.Context())
-	book := &models.Book{
-		Format:          format,
-		S3Key:           key,
-		OriginalName:    header.Filename,
-		UploadedByEmail: uploadedBy,
-		CreatedAt:       time.Now(),
-	}
-
 	fileNameTitle := strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename))
-	book.Title = fileNameTitle
 
 	var noISBNFound bool
+	var bookKey string
+	var bookKeyErr error
+	var meta *service.BookMetadata
+	var coverS3Key string
+	var wg sync.WaitGroup
+
+	// Run book S3 upload in parallel with metadata and cover work so total time ≈ max(book upload, metadata, cover).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		k, e := h.S3.Upload(r.Context(), s3Prefix, header.Filename, bytes.NewReader(fileBytes), contentType)
+		bookKey, bookKeyErr = k, e
+	}()
+
 	if format == "epub" {
-		// Run metadata fetch (Google Books API) and cover extract+S3 upload in parallel to reduce latency.
-		var meta *service.BookMetadata
-		var coverS3Key string
-		var wg sync.WaitGroup
 		wg.Add(2)
 
 		go func() {
@@ -164,9 +159,25 @@ func (h *UploadHandler) Upload(w http.ResponseWriter, r *http.Request) {
 			}
 			coverS3Key = key
 		}()
+	}
 
-		wg.Wait()
+	wg.Wait()
 
+	if bookKeyErr != nil {
+		http.Error(w, `{"error":"failed to upload to storage"}`, http.StatusInternalServerError)
+		return
+	}
+
+	book := &models.Book{
+		Format:          format,
+		S3Key:           bookKey,
+		OriginalName:    header.Filename,
+		UploadedByEmail: uploadedBy,
+		CreatedAt:       time.Now(),
+		Title:           fileNameTitle,
+	}
+
+	if format == "epub" {
 		if meta != nil {
 			if meta.Title != "" {
 				book.Title = meta.Title
