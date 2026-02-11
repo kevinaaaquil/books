@@ -3,7 +3,6 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -29,8 +28,9 @@ type UploadHandler struct {
 }
 
 type UploadResponse struct {
-	ID    string `json:"id"`
-	Title string `json:"title,omitempty"`
+	ID          string `json:"id"`
+	Title       string `json:"title,omitempty"`
+	NoISBNFound bool   `json:"noISBNFound,omitempty"` // true when EPUB had no ISBN so metadata was not fetched
 }
 
 func (h *UploadHandler) Upload(w http.ResponseWriter, r *http.Request) {
@@ -38,8 +38,7 @@ func (h *UploadHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	userID, ok := middleware.UserIDFromContext(r.Context())
-	if !ok {
+	if _, ok := middleware.UserIDFromContext(r.Context()); !ok {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
@@ -64,7 +63,7 @@ func (h *UploadHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	ext := strings.ToLower(strings.TrimSpace(filepath.Ext(header.Filename)))
 	partContentType := header.Header.Get("Content-Type")
-	fmt.Println(ext, partContentType, "########################################################")
+
 	allowedByExt := ext == ".epub" || ext == ".pdf"
 	allowedByMime := strings.HasPrefix(partContentType, "application/epub+zip") || strings.HasPrefix(partContentType, "application/pdf")
 	if !allowedByExt && !allowedByMime {
@@ -78,7 +77,7 @@ func (h *UploadHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s3Prefix := userID.Hex() + "/"
+	s3Prefix := "books/"
 	contentType := contentTypePDF
 	format := "pdf"
 	if ext == ".epub" || strings.HasPrefix(partContentType, "application/epub+zip") {
@@ -92,36 +91,55 @@ func (h *UploadHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	uploadedBy := middleware.EmailFromContext(r.Context())
 	book := &models.Book{
-		UserID:       userID,
-		Format:       format,
-		S3Key:        key,
-		OriginalName: header.Filename,
-		CreatedAt:    time.Now(),
+		Format:          format,
+		S3Key:           key,
+		OriginalName:    header.Filename,
+		UploadedByEmail: uploadedBy,
+		CreatedAt:       time.Now(),
 	}
 
+	fileNameTitle := strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename))
+	noISBNFound := false
 	if format == "epub" {
+		book.Title = fileNameTitle
 		isbn, err := utils.ExtractISBNFromMultipartFile(bytes.NewReader(fileBytes))
 		if err == nil && isbn != "" {
 			meta, err := service.FetchMetadataByISBN(isbn)
 			if err == nil {
-				book.Title = meta.Title
+				if meta.Title != "" {
+					book.Title = meta.Title
+				}
 				book.Authors = meta.Authors
 				book.Publisher = meta.Publisher
 				book.PublishDate = meta.PublishDate
 				book.ISBN = meta.ISBN
 				book.PageCount = meta.PageCount
 				book.CoverURL = meta.CoverURL
+				book.ThumbnailURL = meta.ThumbnailURL
 				book.Edition = meta.Edition
-			}
-			if book.Title == "" {
-				book.Title = strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename))
+				book.Preface = meta.Preface
+				book.Category = meta.Category
+				book.Categories = meta.Categories
+				book.RatingAverage = meta.RatingAverage
+				book.RatingCount = meta.RatingCount
 			}
 		} else {
-			book.Title = strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename))
+			noISBNFound = true
+		}
+		// Extract cover from EPUB and upload to S3 as alternate (used when serializing book as coverUrl/thumbnail)
+		if coverBytes, coverContentType, err := utils.ExtractCoverFromEPUBBytes(fileBytes); err == nil && len(coverBytes) > 0 {
+			coverExt := ".jpg"
+			if strings.Contains(coverContentType, "png") {
+				coverExt = ".png"
+			}
+			if coverKey, err := h.S3.Upload(r.Context(), "books/covers/", "cover"+coverExt, bytes.NewReader(coverBytes), coverContentType); err == nil {
+				book.CoverS3Key = coverKey
+			}
 		}
 	} else {
-		book.Title = strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename))
+		book.Title = fileNameTitle
 	}
 
 	id, err := h.DB.InsertBook(r.Context(), book)
@@ -133,5 +151,5 @@ func (h *UploadHandler) Upload(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(UploadResponse{ID: id.Hex(), Title: book.Title})
+	json.NewEncoder(w).Encode(UploadResponse{ID: id.Hex(), Title: book.Title, NoISBNFound: noISBNFound})
 }

@@ -20,7 +20,7 @@ type Container struct {
 	} `xml:"rootfiles"`
 }
 
-// Package represents the EPUB OPF package structure
+// Package represents the EPUB OPF package structure (partial, for ISBN and cover)
 type Package struct {
 	XMLName  xml.Name `xml:"package"`
 	Metadata struct {
@@ -28,7 +28,18 @@ type Package struct {
 			Scheme string `xml:"scheme,attr"`
 			Value  string `xml:",chardata"`
 		} `xml:"identifier"`
+		Meta []struct {
+			Name    string `xml:"name,attr"`
+			Content string `xml:"content,attr"`
+		} `xml:"meta"`
 	} `xml:"metadata"`
+	Manifest struct {
+		Items []struct {
+			ID       string `xml:"id,attr"`
+			Href     string `xml:"href,attr"`
+			MediaType string `xml:"media-type,attr"`
+		} `xml:"item"`
+	} `xml:"manifest"`
 }
 
 // GoogleBooksResponse represents the response structure from Google Books API
@@ -107,6 +118,72 @@ func ExtractISBNFromMultipartFile(file io.Reader) (string, error) {
 	return "", fmt.Errorf("no ISBN found in EPUB metadata")
 }
 
+// ExtractCoverFromEPUBBytes extracts the cover image from an EPUB (ZIP). Returns (image bytes, media type, error).
+// Looks for <meta name="cover" content="id"/> in OPF metadata and the matching item in manifest.
+func ExtractCoverFromEPUBBytes(fileBytes []byte) ([]byte, string, error) {
+	if len(fileBytes) == 0 {
+		return nil, "", fmt.Errorf("empty file")
+	}
+	reader, err := zip.NewReader(bytes.NewReader(fileBytes), int64(len(fileBytes)))
+	if err != nil {
+		return nil, "", err
+	}
+	containerFile, err := findAndReadFileFromZip(reader, "META-INF/container.xml")
+	if err != nil {
+		return nil, "", err
+	}
+	var container Container
+	if err := xml.Unmarshal(containerFile, &container); err != nil {
+		return nil, "", err
+	}
+	if len(container.RootFiles.RootFile) == 0 {
+		return nil, "", fmt.Errorf("no rootfile in container")
+	}
+	opfPath := container.RootFiles.RootFile[0].FullPath
+	opfContent, err := findAndReadFileFromZip(reader, opfPath)
+	if err != nil {
+		return nil, "", err
+	}
+	var pkg Package
+	if err := xml.Unmarshal(opfContent, &pkg); err != nil {
+		return nil, "", err
+	}
+	var coverID string
+	for _, m := range pkg.Metadata.Meta {
+		if strings.EqualFold(m.Name, "cover") && m.Content != "" {
+			coverID = m.Content
+			break
+		}
+	}
+	if coverID == "" {
+		return nil, "", fmt.Errorf("no cover meta in OPF")
+	}
+	var coverHref, mediaType string
+	for _, item := range pkg.Manifest.Items {
+		if item.ID == coverID {
+			coverHref = item.Href
+			mediaType = item.MediaType
+			break
+		}
+	}
+	if coverHref == "" {
+		return nil, "", fmt.Errorf("cover id not found in manifest")
+	}
+	opfDir := opfPath
+	if idx := strings.LastIndex(opfPath, "/"); idx >= 0 {
+		opfDir = opfPath[:idx+1]
+	}
+	coverPath := opfDir + coverHref
+	coverPath = strings.ReplaceAll(coverPath, "\\", "/")
+	coverBytes, err := findAndReadFileFromZip(reader, coverPath)
+	if err != nil {
+		return nil, "", err
+	}
+	if mediaType == "" {
+		mediaType = "image/jpeg"
+	}
+	return coverBytes, mediaType, nil
+}
 
 // findAndReadFileFromZip reads a specific file from a zip archive
 func findAndReadFileFromZip(reader *zip.Reader, path string) ([]byte, error) {

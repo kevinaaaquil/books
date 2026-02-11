@@ -11,11 +11,16 @@ import (
 
 type contextKey string
 
-const UserIDKey contextKey = "userID"
+const (
+	UserIDKey contextKey = "userID"
+	RoleKey   contextKey = "role"
+	EmailKey  contextKey = "email"
+)
 
 type Claims struct {
 	UserID string `json:"userId"`
 	Email  string `json:"email"`
+	Role   string `json:"role"`
 	jwt.RegisteredClaims
 }
 
@@ -50,6 +55,8 @@ func Auth(jwtSecret string) func(next http.Handler) http.Handler {
 				return
 			}
 			ctx := context.WithValue(r.Context(), UserIDKey, userID)
+			ctx = context.WithValue(ctx, RoleKey, claims.Role)
+			ctx = context.WithValue(ctx, EmailKey, claims.Email)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -58,4 +65,41 @@ func Auth(jwtSecret string) func(next http.Handler) http.Handler {
 func UserIDFromContext(ctx context.Context) (primitive.ObjectID, bool) {
 	id, ok := ctx.Value(UserIDKey).(primitive.ObjectID)
 	return id, ok
+}
+
+func RoleFromContext(ctx context.Context) string {
+	role, _ := ctx.Value(RoleKey).(string)
+	return role
+}
+
+func EmailFromContext(ctx context.Context) string {
+	email, _ := ctx.Value(EmailKey).(string)
+	return email
+}
+
+// RequireAdmin returns 403 if the request context role is not admin.
+func RequireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if RoleFromContext(r.Context()) != "admin" {
+			http.Error(w, `{"error":"admin required"}`, http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RequireAnyRole returns 403 if the request context role is not one of the allowed roles.
+func RequireAnyRole(allowed ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			role := RoleFromContext(r.Context())
+			for _, a := range allowed {
+				if role == a {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			http.Error(w, `{"error":"insufficient permissions"}`, http.StatusForbidden)
+		})
+	}
 }

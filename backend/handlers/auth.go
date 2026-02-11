@@ -15,9 +15,6 @@ import (
 type AuthHandler struct {
 	DB        *store.DB
 	JWTSecret string
-	// Predefined credentials (from config); used if no user exists yet
-	DefaultEmail string
-	DefaultPass  string
 }
 
 type LoginRequest struct {
@@ -28,6 +25,7 @@ type LoginRequest struct {
 type LoginResponse struct {
 	Token string `json:"token"`
 	Email string `json:"email"`
+	Role  string `json:"role"`
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -50,64 +48,33 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"login failed"}`, http.StatusInternalServerError)
 		return
 	}
-	// If no user in DB, accept predefined credentials and optionally seed user (for "predefined" mode)
 	if user == nil {
-		if req.Email != h.DefaultEmail || req.Password != h.DefaultPass {
-			http.Error(w, `{"error":"invalid email or password"}`, http.StatusUnauthorized)
-			return
-		}
-		// Seed user so we have a valid ID for tokens (optional: could use a special "default" user id)
-		user, err = h.ensureDefaultUser(r)
-		if err != nil {
-			http.Error(w, `{"error":"login failed"}`, http.StatusInternalServerError)
-			return
-		}
-	} else {
-		if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
-			http.Error(w, `{"error":"invalid email or password"}`, http.StatusUnauthorized)
-			return
-		}
+		http.Error(w, `{"error":"invalid email or password"}`, http.StatusUnauthorized)
+		return
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
+		http.Error(w, `{"error":"invalid email or password"}`, http.StatusUnauthorized)
+		return
+	}
+	role := user.Role
+	if role == "" {
+		role = models.RoleViewer
 	}
 
-	token, err := h.createToken(user.ID.Hex(), user.Email)
+	token, err := h.createToken(user.ID.Hex(), user.Email, role)
 	if err != nil {
 		http.Error(w, `{"error":"could not create token"}`, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(LoginResponse{Token: token, Email: user.Email})
+	json.NewEncoder(w).Encode(LoginResponse{Token: token, Email: user.Email, Role: role})
 }
 
-func (h *AuthHandler) ensureDefaultUser(r *http.Request) (*models.User, error) {
-	// Check again in case of race
-	user, err := h.DB.UserByEmail(r.Context(), h.DefaultEmail)
-	if err != nil {
-		return nil, err
-	}
-	if user != nil {
-		return user, nil
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(h.DefaultPass), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, err
-	}
-	newUser := &models.User{
-		Email:     h.DefaultEmail,
-		Password:  string(hash),
-		CreatedAt: time.Now(),
-	}
-	id, err := h.DB.CreateUser(r.Context(), newUser)
-	if err != nil {
-		return nil, err
-	}
-	newUser.ID = id
-	return newUser, nil
-}
-
-func (h *AuthHandler) createToken(userID, email string) (string, error) {
+func (h *AuthHandler) createToken(userID, email, role string) (string, error) {
 	claims := &middleware.Claims{
 		UserID: userID,
 		Email:  email,
+		Role:   role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour * 7)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

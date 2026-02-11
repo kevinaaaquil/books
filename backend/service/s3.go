@@ -66,6 +66,22 @@ func (s *S3Service) Delete(ctx context.Context, key string) error {
 	return err
 }
 
+// GetObject downloads the object from S3 and returns its body and content type. Caller must close the returned reader.
+func (s *S3Service) GetObject(ctx context.Context, key string) (body io.ReadCloser, contentType string, err error) {
+	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	ct := ""
+	if out.ContentType != nil {
+		ct = *out.ContentType
+	}
+	return out.Body, ct, nil
+}
+
 // PresignedGetURL returns a temporary URL to download the object (e.g. for reading the book).
 func (s *S3Service) PresignedGetURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
 	presigner := s3.NewPresignClient(s.client)

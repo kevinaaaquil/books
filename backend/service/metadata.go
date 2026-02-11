@@ -8,119 +8,122 @@ import (
 	"strings"
 )
 
-// Open Library ISBN response (subset we use)
-type openLibraryISBNResp struct {
-	Title          string   `json:"title"`
-	Publishers     []string `json:"publishers"`
-	PublishDate    string   `json:"publish_date"`
-	NumberOfPages  int      `json:"number_of_pages"`
-	EditionName    string   `json:"edition_name"`
-	ISBN10         []string `json:"isbn_10"`
-	ISBN13         []string `json:"isbn_13"`
-	Covers         []int    `json:"covers"`
-	Works          []struct {
-		Key string `json:"key"`
-	} `json:"works"`
+const googleBooksBase = "https://www.googleapis.com/books/v1/volumes"
+
+// googleBooksVolumesResp is the response from GET /volumes?q=isbn:...
+type googleBooksVolumesResp struct {
+	TotalItems int `json:"totalItems"`
+	Items      []struct {
+		VolumeInfo struct {
+			Title         string   `json:"title"`
+			Subtitle      string   `json:"subtitle"`
+			Authors       []string `json:"authors"`
+			Publisher     string   `json:"publisher"`
+			PublishedDate string   `json:"publishedDate"`
+			Description   string   `json:"description"`
+			PageCount     int      `json:"pageCount"`
+			Categories    []string `json:"categories"`
+			ImageLinks    struct {
+				SmallThumbnail string `json:"smallThumbnail"`
+				Thumbnail      string `json:"thumbnail"`
+			} `json:"imageLinks"`
+			IndustryIdentifiers []struct {
+				Type       string `json:"type"`
+				Identifier string `json:"identifier"`
+			} `json:"industryIdentifiers"`
+			AverageRating float64 `json:"averageRating"`
+			RatingsCount  int     `json:"ratingsCount"`
+		} `json:"volumeInfo"`
+	} `json:"items"`
 }
 
 // BookMetadata is the normalized metadata we store and return.
 type BookMetadata struct {
-	Title       string
-	Authors     []string
-	Publisher   string
-	PublishDate string
-	ISBN        string
-	PageCount   int
-	CoverURL    string
-	Edition     string
+	Title         string
+	Authors       []string
+	Publisher     string
+	PublishDate   string
+	ISBN          string
+	PageCount     int
+	CoverURL      string
+	ThumbnailURL  string
+	Edition       string
+	Preface       string   // description
+	Category      string
+	Categories    []string
+	RatingAverage float64
+	RatingCount   int
 }
 
-const openLibraryBase = "https://openlibrary.org"
-
-// FetchMetadataByISBN fetches book metadata from Open Library API by ISBN.
+// FetchMetadataByISBN fetches book metadata from Google Books API by ISBN.
 func FetchMetadataByISBN(isbn string) (*BookMetadata, error) {
 	isbn = strings.TrimSpace(isbn)
 	if isbn == "" {
 		return nil, fmt.Errorf("isbn is required")
 	}
-	u := openLibraryBase + "/isbn/" + url.PathEscape(isbn) + ".json"
+	q := url.Values{}
+	q.Set("q", "isbn:"+isbn)
+	u := googleBooksBase + "?" + q.Encode()
 	resp, err := http.Get(u)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("open library returned %d", resp.StatusCode)
+		return nil, fmt.Errorf("google books returned %d", resp.StatusCode)
 	}
-	var ol openLibraryISBNResp
-	if err := json.NewDecoder(resp.Body).Decode(&ol); err != nil {
+	var data googleBooksVolumesResp
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, err
 	}
+	if data.TotalItems == 0 || len(data.Items) == 0 {
+		return nil, fmt.Errorf("no volume found for isbn %s", isbn)
+	}
+	vi := data.Items[0].VolumeInfo
 	meta := &BookMetadata{
-		Title:       ol.Title,
-		PublishDate: ol.PublishDate,
-		PageCount:   ol.NumberOfPages,
-		Edition:     ol.EditionName,
-		ISBN:        isbn,
+		Title:         vi.Title,
+		Authors:       vi.Authors,
+		Publisher:     vi.Publisher,
+		PublishDate:   vi.PublishedDate,
+		PageCount:     vi.PageCount,
+		Categories:    vi.Categories,
+		RatingAverage: vi.AverageRating,
+		RatingCount:   vi.RatingsCount,
+		ISBN:          isbn,
 	}
-	if len(ol.Publishers) > 0 {
-		meta.Publisher = ol.Publishers[0]
+	if vi.Subtitle != "" {
+		meta.Title = meta.Title + ": " + vi.Subtitle
 	}
-	if len(ol.ISBN13) > 0 {
-		meta.ISBN = ol.ISBN13[0]
-	} else if len(ol.ISBN10) > 0 {
-		meta.ISBN = ol.ISBN10[0]
+	if len(vi.IndustryIdentifiers) > 0 {
+		for _, id := range vi.IndustryIdentifiers {
+			if id.Type == "ISBN_13" || id.Type == "ISBN_10" {
+				meta.ISBN = id.Identifier
+				break
+			}
+		}
 	}
-	if len(ol.Covers) > 0 {
-		meta.CoverURL = fmt.Sprintf("https://covers.openlibrary.org/b/id/%d-L.jpg", ol.Covers[0])
+	if len(vi.Categories) > 0 {
+		meta.Category = vi.Categories[0]
 	}
-	// Optionally fetch authors from work; for now leave empty if not in edition response
-	if len(ol.Works) > 0 {
-		authors, _ := fetchAuthorsForWork(ol.Works[0].Key)
-		meta.Authors = authors
+	// Use Open Library covers by ISBN (no captcha); Google Books image URLs often require captcha
+	if meta.ISBN != "" {
+		meta.CoverURL = openLibraryCoverURL(meta.ISBN, "L")
+		meta.ThumbnailURL = openLibraryCoverURL(meta.ISBN, "S")
 	}
+	meta.Preface = strings.TrimSpace(vi.Description)
 	return meta, nil
 }
 
-type workResp struct {
-	Authors []struct {
-		Author struct {
-			Key string `json:"key"`
-		} `json:"author"`
-	} `json:"authors"`
-}
-
-type authorResp struct {
-	Name string `json:"name"`
-}
-
-func fetchAuthorsForWork(workKey string) ([]string, error) {
-	u := openLibraryBase + workKey + ".json"
-	resp, err := http.Get(u)
-	if err != nil {
-		return nil, err
+// openLibraryCoverURL returns a direct cover image URL by ISBN. Size: S (small), M (medium), L (large). No captcha.
+func openLibraryCoverURL(isbn, size string) string {
+	isbn = strings.TrimSpace(isbn)
+	if isbn == "" {
+		return ""
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, nil
+	// Strip hyphens for a clean URL; Open Library accepts both
+	clean := strings.ReplaceAll(isbn, "-", "")
+	if clean == "" {
+		return ""
 	}
-	var work workResp
-	if err := json.NewDecoder(resp.Body).Decode(&work); err != nil {
-		return nil, err
-	}
-	var names []string
-	for _, a := range work.Authors {
-		authorURL := openLibraryBase + a.Author.Key + ".json"
-		r, err := http.Get(authorURL)
-		if err != nil {
-			continue
-		}
-		var author authorResp
-		_ = json.NewDecoder(r.Body).Decode(&author)
-		r.Body.Close()
-		if author.Name != "" {
-			names = append(names, author.Name)
-		}
-	}
-	return names, nil
+	return "https://covers.openlibrary.org/b/isbn/" + url.PathEscape(clean) + "-" + size + ".jpg"
 }

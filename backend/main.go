@@ -14,9 +14,11 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/kevinaaaquil/books/backend/config"
 	"github.com/kevinaaaquil/books/backend/handlers"
+	"github.com/kevinaaaquil/books/backend/models"
 	"github.com/kevinaaaquil/books/backend/middleware"
 	"github.com/kevinaaaquil/books/backend/service"
 	"github.com/kevinaaaquil/books/backend/store"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func main() {
@@ -38,6 +40,11 @@ func main() {
 		}
 	}()
 
+	// If users collection is empty, create admin user from env (once); after that only MongoDB is used for login.
+	if err := seedBootstrapUser(ctx, db, cfg.AuthEmail, cfg.AuthPass); err != nil {
+		log.Fatal("bootstrap user:", err)
+	}
+
 	var s3Service *service.S3Service
 	if cfg.S3Bucket != "" {
 		s3Service, err = service.NewS3Service(ctx, cfg.S3Bucket, cfg.S3Region, cfg.S3AccessKeyID, cfg.S3SecretKey)
@@ -48,18 +55,14 @@ func main() {
 		log.Println("warning: AWS_S3_BUCKET not set; uploads will fail")
 	}
 
-	authHandler := &handlers.AuthHandler{
-		DB:           db,
-		JWTSecret:    cfg.JWTSecret,
-		DefaultEmail: cfg.AuthEmail,
-		DefaultPass:  cfg.AuthPass,
-	}
+	authHandler := &handlers.AuthHandler{DB: db, JWTSecret: cfg.JWTSecret}
 	uploadHandler := &handlers.UploadHandler{
 		DB:       db,
 		S3:       s3Service,
 		MaxBytes: cfg.MaxUploadMB * 1024 * 1024,
 	}
 	booksHandler := &handlers.BooksHandler{DB: db, S3: s3Service}
+	usersHandler := &handlers.UsersHandler{DB: db}
 
 	r := chi.NewRouter()
 	r.Use(middleware.AllowAll())
@@ -77,16 +80,41 @@ func main() {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	r.Route("/api", func(r chi.Router) {
+		r.Route("/api", func(r chi.Router) {
 		r.Post("/auth/login", authHandler.Login)
-		// Protected routes
+		r.Get("/books/{id}/cover", booksHandler.Cover) // public so <img src> works without auth
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.Auth(cfg.JWTSecret))
-			r.Post("/upload", uploadHandler.Upload)
-			r.Get("/books", booksHandler.List)
-			r.Get("/books/{id}", booksHandler.Get)
-			r.Get("/books/{id}/download", booksHandler.Download)
-			r.Delete("/books/{id}", booksHandler.Delete)
+			// Read: admin, editor, viewer
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireAnyRole("admin", "editor", "viewer"))
+				r.Get("/books", booksHandler.List)
+				r.Get("/books/{id}", booksHandler.Get)
+				r.Get("/books/{id}/download", booksHandler.Download)
+			})
+			// Write (upload): admin, editor
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireAnyRole("admin", "editor", "write_only"))
+				r.Post("/upload", uploadHandler.Upload)
+			})
+			// Refresh metadata: admin, editor
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireAnyRole("admin", "editor"))
+				r.Post("/books/{id}/refresh-metadata", booksHandler.RefreshMetadata)
+			})
+			// Delete books: admin only
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireAdmin)
+				r.Delete("/books/{id}", booksHandler.Delete)
+			})
+			// Manage users: admin only
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireAdmin)
+				r.Get("/users", usersHandler.ListUsers)
+				r.Post("/users", usersHandler.CreateUser)
+				r.Patch("/users/{id}", usersHandler.UpdateUser)
+				r.Delete("/users/{id}", usersHandler.DeleteUser)
+			})
 		})
 	})
 
@@ -106,4 +134,30 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Println("shutdown:", err)
 	}
+}
+
+func seedBootstrapUser(ctx context.Context, db *store.DB, email, password string) error {
+	count, err := db.UsersCount(ctx)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	user := &models.User{
+		Email:     email,
+		Password:  string(hash),
+		Role:      models.RoleAdmin,
+		CreatedAt: time.Now(),
+	}
+	_, err = db.CreateUser(ctx, user)
+	if err != nil {
+		return err
+	}
+	log.Println("created bootstrap admin user from env (users collection was empty)")
+	return nil
 }

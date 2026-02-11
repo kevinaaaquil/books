@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { login, setToken } from "@/lib/api";
+import { login, setToken, setRole } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -16,8 +16,9 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const { token } = await login(email, password);
+      const { token, role } = await login(email, password);
       setToken(token);
+      if (role) setRole(role);
       router.push("/books");
       router.refresh();
     } catch (err) {

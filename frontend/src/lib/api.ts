@@ -10,6 +10,13 @@ function getApiBaseUrl(): string {
   return url.replace(/\/$/, "");
 }
 
+/** Returns absolute URL for cover/thumbnail (e.g. /api/books/:id/cover becomes API base + path so auth and cross-origin work). */
+export function getBookCoverOrThumbnailUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  if (url.startsWith("/")) return getApiBaseUrl() + url;
+  return url;
+}
+
 export type Book = {
   id: string;
   title: string;
@@ -19,9 +26,23 @@ export type Book = {
   isbn?: string;
   pageCount?: number;
   coverUrl?: string;
+  thumbnailUrl?: string;
   edition?: string;
+  preface?: string;
+  category?: string;
+  categories?: string[];
+  ratingAverage?: number;
+  ratingCount?: number;
   format: string;
   originalName: string;
+  uploadedByEmail?: string;
+  createdAt: string;
+};
+
+export type User = {
+  id: string;
+  email: string;
+  role: string;
   createdAt: string;
 };
 
@@ -30,16 +51,55 @@ function getToken(): string | null {
   return localStorage.getItem("token");
 }
 
+const ROLE_KEY = "role";
+
 export function setToken(token: string) {
   localStorage.setItem("token", token);
 }
 
+export function setRole(role: string) {
+  localStorage.setItem(ROLE_KEY, role);
+}
+
+export function getRole(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(ROLE_KEY);
+}
+
 export function clearToken() {
   localStorage.removeItem("token");
+  localStorage.removeItem(ROLE_KEY);
 }
 
 export function isAuthenticated(): boolean {
   return !!getToken();
+}
+
+export function isAdmin(): boolean {
+  return getRole() === "admin";
+}
+
+/** Can list, view, and download books. */
+export function canReadBooks(): boolean {
+  const r = getRole();
+  return r === "admin" || r === "editor" || r === "viewer";
+}
+
+/** Can upload books. */
+export function canUploadBooks(): boolean {
+  const r = getRole();
+  return r === "admin" || r === "editor" || r === "write_only";
+}
+
+/** Can delete books. */
+export function canDeleteBooks(): boolean {
+  return getRole() === "admin";
+}
+
+/** Can refresh book metadata (editor, admin). */
+export function canRefreshMetadata(): boolean {
+  const r = getRole();
+  return r === "admin" || r === "editor";
 }
 
 async function authFetch(path: string, options: RequestInit = {}) {
@@ -56,7 +116,7 @@ async function authFetch(path: string, options: RequestInit = {}) {
   return res;
 }
 
-export async function login(email: string, password: string): Promise<{ token: string; email: string }> {
+export async function login(email: string, password: string): Promise<{ token: string; email: string; role?: string }> {
   const res = await fetch(`${getApiBaseUrl()}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -65,6 +125,70 @@ export async function login(email: string, password: string): Promise<{ token: s
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Login failed");
   return data;
+}
+
+export const USER_ROLES = ["viewer", "editor", "write_only"] as const;
+export type CreateUserRole = (typeof USER_ROLES)[number];
+
+export async function createUser(email: string, password: string, role: string): Promise<{ id: string; email: string; role: string }> {
+  const res = await authFetch("/api/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, role }),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    try {
+      const data = JSON.parse(text) as { error?: string };
+      throw new Error(data.error || "Failed to create user");
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      throw new Error("Failed to create user");
+    }
+  }
+  return JSON.parse(text) as { id: string; email: string; role: string };
+}
+
+export async function listUsers(): Promise<User[]> {
+  const res = await authFetch("/api/users");
+  if (!res.ok) throw new Error("Failed to load users");
+  return res.json();
+}
+
+export async function updateUser(
+  id: string,
+  body: { email?: string; password?: string; role?: string }
+): Promise<User> {
+  const res = await authFetch(`/api/users/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    try {
+      const data = JSON.parse(text) as { error?: string };
+      throw new Error(data.error || "Failed to update user");
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      throw new Error("Failed to update user");
+    }
+  }
+  return JSON.parse(text) as User;
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  const res = await authFetch(`/api/users/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const text = await res.text();
+    try {
+      const data = JSON.parse(text) as { error?: string };
+      throw new Error(data.error || "Failed to delete user");
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      throw new Error("Failed to delete user");
+    }
+  }
 }
 
 export async function fetchBooks(): Promise<Book[]> {
@@ -86,6 +210,26 @@ export async function getDownloadUrl(id: string): Promise<string> {
   return data.url;
 }
 
+/** Refetch metadata by ISBN and update the book. Pass isbn to use a new ISBN (overwrites existing); omit to use book's current ISBN. */
+export async function refreshBookMetadata(id: string, isbn?: string): Promise<Book> {
+  const res = await authFetch(`/api/books/${id}/refresh-metadata`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(isbn != null && isbn !== "" ? { isbn: isbn.trim() } : {}),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    try {
+      const data = JSON.parse(text) as { error?: string };
+      throw new Error(data.error || "Failed to refresh metadata");
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      throw new Error("Failed to refresh metadata");
+    }
+  }
+  return JSON.parse(text) as Book;
+}
+
 export async function deleteBook(id: string): Promise<void> {
   const res = await authFetch(`/api/books/${id}`, { method: "DELETE" });
   if (!res.ok) {
@@ -100,7 +244,7 @@ export async function deleteBook(id: string): Promise<void> {
   }
 }
 
-export async function uploadBook(file: File): Promise<{ id: string; title: string }> {
+export async function uploadBook(file: File): Promise<{ id: string; title: string; noISBNFound?: boolean }> {
   const token = getToken();
   if (!token) throw new Error("Not logged in");
   const form = new FormData();
@@ -122,7 +266,7 @@ export async function uploadBook(file: File): Promise<{ id: string; title: strin
     }
   }
   try {
-    return JSON.parse(text) as { id: string; title: string };
+    return JSON.parse(text) as { id: string; title: string; noISBNFound?: boolean };
   } catch {
     throw new Error("Invalid response from server");
   }
