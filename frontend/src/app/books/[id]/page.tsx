@@ -40,7 +40,7 @@ export default function BookDetailPage() {
     const next = !useExtractedCover;
     try {
       const me = await updateMePreferences({ useExtractedCover: next });
-      setUseExtractedCover(me.useExtractedCover);
+      setUseExtractedCover(me.useExtractedCover ?? next);
     } catch {
       // keep current state on error
     }

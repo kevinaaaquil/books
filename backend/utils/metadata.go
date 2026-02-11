@@ -25,12 +25,15 @@ type Package struct {
 	XMLName  xml.Name `xml:"package"`
 	Metadata struct {
 		Identifiers []struct {
+			ID     string `xml:"id,attr"`
 			Scheme string `xml:"scheme,attr"`
 			Value  string `xml:",chardata"`
 		} `xml:"identifier"`
 		Meta []struct {
-			Name    string `xml:"name,attr"`
-			Content string `xml:"content,attr"`
+			Name     string `xml:"name,attr"`
+			Property string `xml:"property,attr"`
+			Refines  string `xml:"refines,attr"`
+			Content  string `xml:"content,attr"`
 		} `xml:"meta"`
 	} `xml:"metadata"`
 	Manifest struct {
@@ -80,8 +83,11 @@ func ExtractISBNFromMultipartFile(file io.Reader) (string, error) {
 		return "", fmt.Errorf("invalid EPUB file (not a valid ZIP): %v", err)
 	}
 
-	// Find and read container.xml
+	// Find and read container.xml (try common path variants)
 	containerFile, err := findAndReadFileFromZip(reader, "META-INF/container.xml")
+	if err != nil {
+		containerFile, err = findAndReadFileFromZip(reader, "meta-inf/container.xml")
+	}
 	if err != nil {
 		return "", fmt.Errorf("failed to read container.xml: %v", err)
 	}
@@ -107,11 +113,51 @@ func ExtractISBNFromMultipartFile(file io.Reader) (string, error) {
 		return "", fmt.Errorf("failed to parse OPF file: %v", err)
 	}
 
-	// Look for ISBN in identifiers
-	for _, identifier := range pkg.Metadata.Identifiers {
-		scheme := strings.ToLower(identifier.Scheme)
+	// 1) Prefer identifiers with explicit ISBN scheme
+	for _, id := range pkg.Metadata.Identifiers {
+		v := strings.TrimSpace(id.Value)
+		if v == "" {
+			continue
+		}
+		scheme := strings.ToLower(id.Scheme)
 		if scheme == "isbn" || scheme == "isbn-13" || scheme == "isbn-10" {
-			return sanitizeISBN(identifier.Value), nil
+			if cleaned := sanitizeISBN(v); isValidISBN(cleaned) {
+				return cleaned, nil
+			}
+		}
+	}
+
+	// 2) EPUB 3: meta refines="#id" property="identifier-type" -> find identifier with that id
+	for _, m := range pkg.Metadata.Meta {
+		content := strings.TrimSpace(strings.ToLower(m.Content))
+		prop := strings.TrimSpace(strings.ToLower(m.Property))
+		if (prop == "identifier-type" || prop == "scheme") && (content == "isbn" || content == "isbn-13" || content == "isbn-10") {
+			refinesID := strings.TrimPrefix(strings.TrimSpace(m.Refines), "#")
+			for _, id := range pkg.Metadata.Identifiers {
+				if id.ID == refinesID {
+					v := strings.TrimSpace(id.Value)
+					if cleaned := sanitizeISBN(v); isValidISBN(cleaned) {
+						return cleaned, nil
+					}
+					break
+				}
+			}
+		}
+	}
+
+	// 3) Fallback: any identifier value that looks like an ISBN (10 or 13 digits)
+	for _, id := range pkg.Metadata.Identifiers {
+		v := strings.TrimSpace(id.Value)
+		cleaned := sanitizeISBN(v)
+		if isValidISBN(cleaned) {
+			return cleaned, nil
+		}
+	}
+
+	// 4) Namespace fallback: if no identifiers were unmarshaled, scan raw OPF for identifier/dc:identifier content
+	if len(pkg.Metadata.Identifiers) == 0 {
+		if isbn := extractISBNFromRawOPF(opfContent); isbn != "" {
+			return isbn, nil
 		}
 	}
 
@@ -185,17 +231,22 @@ func ExtractCoverFromEPUBBytes(fileBytes []byte) ([]byte, string, error) {
 	return coverBytes, mediaType, nil
 }
 
-// findAndReadFileFromZip reads a specific file from a zip archive
+// normalizeZipPath replaces backslashes with forward slashes for consistent matching.
+func normalizeZipPath(path string) string {
+	return strings.ReplaceAll(path, "\\", "/")
+}
+
+// findAndReadFileFromZip reads a specific file from a zip archive. Path matching is case-insensitive and normalizes backslashes.
 func findAndReadFileFromZip(reader *zip.Reader, path string) ([]byte, error) {
+	path = normalizeZipPath(path)
 	for _, file := range reader.File {
-		if file.Name == path {
+		if normalizeZipPath(file.Name) == path || strings.EqualFold(normalizeZipPath(file.Name), path) {
 			rc, err := file.Open()
 			if err != nil {
 				return nil, fmt.Errorf("failed to open zip file entry: %v", err)
 			}
-			defer rc.Close()
-
 			content, err := io.ReadAll(rc)
+			rc.Close()
 			if err != nil {
 				return nil, fmt.Errorf("failed to read zip file entry: %v", err)
 			}
@@ -214,4 +265,77 @@ func sanitizeISBN(isbn string) string {
 		}
 	}
 	return cleaned.String()
+}
+
+// isValidISBN returns true if the string (digits only) is a valid ISBN-10 or ISBN-13 length.
+func isValidISBN(cleaned string) bool {
+	if len(cleaned) == 13 {
+		return true // ISBN-13
+	}
+	if len(cleaned) == 10 {
+		return true // ISBN-10
+	}
+	return false
+}
+
+// extractISBNFromRawOPF scans raw OPF XML for identifier-like elements when namespaces prevent normal unmarshaling.
+func extractISBNFromRawOPF(opfContent []byte) string {
+	s := string(opfContent)
+	idents := extractIdentifierContents(s)
+	for _, v := range idents {
+		v = strings.TrimSpace(v)
+		cleaned := sanitizeISBN(v)
+		if isValidISBN(cleaned) {
+			return cleaned
+		}
+	}
+	return ""
+}
+
+// extractIdentifierContents returns text content of all elements whose tag ends with "identifier" (e.g. <identifier>, <dc:identifier>).
+func extractIdentifierContents(xmlStr string) []string {
+	var out []string
+	for i := 0; i < len(xmlStr); i++ {
+		if xmlStr[i] != '<' {
+			continue
+		}
+		// Find end of opening tag (allow attributes)
+		angle := strings.Index(xmlStr[i:], ">")
+		if angle < 0 {
+			break
+		}
+		angle += i
+		tagAndAttrs := xmlStr[i+1 : angle]
+		// First token is the tag name (e.g. "dc:identifier" or "identifier")
+		firstSpace := strings.IndexAny(tagAndAttrs, " \t\n\r")
+		tag := tagAndAttrs
+		if firstSpace >= 0 {
+			tag = tagAndAttrs[:firstSpace]
+		}
+		if !strings.HasSuffix(tag, "identifier") {
+			i = angle
+			continue
+		}
+		contentStart := angle + 1
+		// Find closing </...identifier>
+		closeIdx := strings.Index(xmlStr[contentStart:], "</")
+		if closeIdx < 0 {
+			continue
+		}
+		closeStart := contentStart + closeIdx
+		closeEnd := strings.Index(xmlStr[closeStart:], ">")
+		if closeEnd < 0 {
+			continue
+		}
+		closeTag := xmlStr[closeStart+2 : closeStart+closeEnd]
+		if !strings.HasSuffix(closeTag, "identifier") {
+			continue
+		}
+		content := xmlStr[contentStart:closeStart]
+		if !strings.Contains(content, "<") {
+			out = append(out, content)
+		}
+		i = closeStart + closeEnd
+	}
+	return out
 }
