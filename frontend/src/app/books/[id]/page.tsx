@@ -76,7 +76,18 @@ export default function BookDetailPage() {
     setDownloading(true);
     try {
       const url = await getDownloadUrl(id);
-      window.open(url, "_blank");
+      const a = document.createElement("a");
+      a.href = url;
+      const ext = book?.format ? `.${book.format.toLowerCase().replace(/^\./, "")}` : ".epub";
+      a.download = book?.originalName && !book.originalName.includes("/")
+        ? book.originalName
+        : book?.title
+          ? `${book.title.replace(/[/\\?%*:|"<>]/g, "-")}${ext}`
+          : `book${ext}`;
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     } finally {
       setDownloading(false);
     }
