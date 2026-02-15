@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -83,12 +84,22 @@ func (s *S3Service) GetObject(ctx context.Context, key string) (body io.ReadClos
 }
 
 // PresignedGetURL returns a temporary URL to download the object (e.g. for reading the book).
-func (s *S3Service) PresignedGetURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
-	presigner := s3.NewPresignClient(s.client)
-	req, err := presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+// If responseFilename is non-empty, the presigned URL will set ResponseContentDisposition
+// so the browser uses that name instead of the S3 key when saving the file.
+func (s *S3Service) PresignedGetURL(ctx context.Context, key string, expiry time.Duration, responseFilename string) (string, error) {
+	input := &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
-	}, func(opts *s3.PresignOptions) {
+	}
+	if responseFilename != "" {
+		// Sanitize for Content-Disposition: escape \ and ", then quote
+		safe := responseFilename
+		safe = strings.ReplaceAll(safe, "\\", "\\\\")
+		safe = strings.ReplaceAll(safe, "\"", "\\\"")
+		input.ResponseContentDisposition = aws.String(`attachment; filename="` + safe + `"`)
+	}
+	presigner := s3.NewPresignClient(s.client)
+	req, err := presigner.PresignGetObject(ctx, input, func(opts *s3.PresignOptions) {
 		opts.Expires = expiry
 	})
 	if err != nil {

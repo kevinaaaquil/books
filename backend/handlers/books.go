@@ -166,7 +166,23 @@ func (h *BooksHandler) Download(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"download not configured"}`, http.StatusServiceUnavailable)
 		return
 	}
-	url, err := h.S3.PresignedGetURL(r.Context(), book.S3Key, 15*time.Minute)
+	ext := ".epub"
+	if book.Format != "" {
+		ext = "." + strings.ToLower(strings.TrimPrefix(book.Format, "."))
+	}
+	responseFilename := book.OriginalName
+	if responseFilename == "" || strings.Contains(responseFilename, "/") {
+		if book.Title != "" {
+			safeTitle := strings.TrimSpace(book.Title)
+			for _, c := range `/\.?%*:|"<>` {
+				safeTitle = strings.ReplaceAll(safeTitle, string(c), "-")
+			}
+			responseFilename = safeTitle + ext
+		} else {
+			responseFilename = "book" + ext
+		}
+	}
+	url, err := h.S3.PresignedGetURL(r.Context(), book.S3Key, 15*time.Minute, responseFilename)
 	if err != nil {
 		http.Error(w, `{"error":"failed to generate download url"}`, http.StatusInternalServerError)
 		return
